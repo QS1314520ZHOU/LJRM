@@ -1,0 +1,37 @@
+﻿# syntax=docker/dockerfile:1
+
+# 在 Oracle Linux 8.2 中构建，保证产物在 OEL/RHEL 8 系 glibc 环境兼容。
+FROM oraclelinux:8.2 AS builder
+
+ARG NODE_VERSION=18.20.4
+ENV NODE_HOME=/opt/node
+ENV PATH=${NODE_HOME}/bin:${PATH}
+ENV npm_config_cache=/tmp/.npm-cache
+ENV PKG_CACHE_PATH=/tmp/.pkg-cache
+
+WORKDIR /app
+
+# gcc/g++/make/python3 用于 pkg 在远端无预编译 Node 基座时，在 OEL8.2 内本机编译基座。
+RUN dnf -y install ca-certificates curl tar xz gzip findutils python3 make gcc gcc-c++ \
+    && dnf clean all \
+    && curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" -o /tmp/node.tar.xz \
+    && mkdir -p "${NODE_HOME}" \
+    && tar -xJf /tmp/node.tar.xz -C "${NODE_HOME}" --strip-components=1 \
+    && rm -f /tmp/node.tar.xz \
+    && node --version \
+    && npm --version
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build:oel8 \
+    && chmod +x dist/icu-stats-oel8-x64 \
+    && mkdir -p /out \
+    && cp dist/icu-stats-oel8-x64 /out/icu-stats-oel8-x64 \
+    && cp .env.example /out/.env.example \
+    && cp README-binary.md /out/README-binary.md
+
+# 该 stage 只用于 docker build --output 导出文件，不用于运行容器。
+FROM scratch AS artifact
+COPY --from=builder /out/ /
