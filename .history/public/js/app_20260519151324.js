@@ -39,58 +39,6 @@ let lastDetailMeta = null;
 let detailHistory = [];   // 详情弹窗的层级栈，[{ openArgs, detail, meta, title, status }, ...]
 
 
-const QUALITY_INDICATOR_TOOLTIP_MAP = {
-  shockBundleRate: [
-    '通过医嘱提取',
-    '分子医嘱：感染性休克患者集束化治疗',
-    '分母医嘱：感染性休克护理常规',
-  ].join('\n'),
-  dvtRate: [
-    '通过医嘱提取',
-    '分子医嘱：肢体气压治疗 / 梯度压力弹力袜 / 腔静脉滤器 / 低分子肝素钠 / 低分子肝素钙 / 那曲肝素 / 依诺肝素 / 达肝素钠注射液 / 利伐沙班',
-    '分母逻辑：同期ICU患者总数',
-  ].join('\n'),
-  shockUltrasoundRate: [
-    '通过医嘱提取',
-    '分子医嘱：重症超声筛查评估',
-    '分母医嘱：休克护理常规',
-  ].join('\n'),
-  shockHemodynamicRate: [
-    '通过医嘱提取',
-    '分子医嘱：CVP',
-    '分母医嘱：休克护理常规',
-  ].join('\n'),
-  ardsRate: [
-    '通过医嘱提取',
-    '分子医嘱：俯卧位通气',
-    '分母医嘱：中重度ARDS护理常规',
-  ].join('\n'),
-  en48hRate: [
-    '通过医嘱提取',
-    '分子医嘱：流质饮食',
-    '分母逻辑：入科超过48h的同期ICU患者',
-  ].join('\n'),
-  painRate: [
-    '通过医嘱提取',
-    '分子医嘱：镇痛评估',
-    '分母逻辑：同期ICU患者总数',
-  ].join('\n'),
-  sedationRate: [
-    '通过医嘱提取',
-    '分子医嘱：镇静评估',
-    '分母逻辑：同期ICU患者总数',
-  ].join('\n'),
-  acuteBrainInjuryRate: [
-    '通过医嘱提取',
-    '分子医嘱：格拉斯哥昏迷评分',
-    '分母医嘱：急性脑损伤护理常规',
-  ].join('\n'),
-};
-
-const qualityTooltipEl = document.createElement('div');
-qualityTooltipEl.className = 'quality-tooltip-popup hidden';
-document.body.appendChild(qualityTooltipEl);
-
 els.btnTabQuality.addEventListener('click', () => switchView('quality'));
 els.btnTabDrg.addEventListener('click', () => switchView('drg'));
 els.btnYearQuery.addEventListener('click', () => handleQuery('year'));
@@ -307,7 +255,7 @@ function renderQualityTable(indicators) {
 
   els.tableBody.innerHTML = indicators.map(row => `
     <tr>
-      <td class="quality-name-cell${getQualityIndicatorTooltip(row.key) ? ' quality-name-tooltip' : ''}" data-tooltip="${escapeHtml(getQualityIndicatorTooltip(row.key) || '').replace(/\n/g, '&#10;')}">${escapeHtml(row.name)}</td>
+      <td class="quality-name-cell">${escapeHtml(row.name)}</td>
       ${renderQualityValueCell(row, 'ratio', row.ratio)}
       ${renderQualityValueCell(row, 'numerator', row.numerator)}
       ${renderQualityValueCell(row, 'denominator', row.denominator)}
@@ -318,48 +266,12 @@ function renderQualityTable(indicators) {
   els.tableBody.querySelectorAll('.quality-detail-trigger').forEach(cell => {
     cell.addEventListener('click', () => handleQualityCellClick(cell.dataset.key, cell.dataset.field));
   });
-  bindQualityNameTooltips();
 }
 
 function renderQualityValueCell(row, field, value) {
   void row;
   void field;
   return `<td>${escapeHtml(value ?? '')}</td>`;
-}
-
-function getQualityIndicatorTooltip(indicatorKey) {
-  return QUALITY_INDICATOR_TOOLTIP_MAP[indicatorKey] || '';
-}
-
-function bindQualityNameTooltips() {
-  els.tableBody.querySelectorAll('.quality-name-tooltip').forEach(cell => {
-    cell.addEventListener('mouseenter', event => showQualityTooltip(event.currentTarget));
-    cell.addEventListener('mousemove', event => moveQualityTooltip(event));
-    cell.addEventListener('mouseleave', hideQualityTooltip);
-  });
-}
-
-function showQualityTooltip(target) {
-  const text = target?.dataset?.tooltip || '';
-  if (!text) return;
-  qualityTooltipEl.textContent = text;
-  qualityTooltipEl.classList.remove('hidden');
-}
-
-function moveQualityTooltip(event) {
-  if (qualityTooltipEl.classList.contains('hidden')) return;
-  const offsetX = 18;
-  const offsetY = 18;
-  const maxLeft = window.innerWidth - qualityTooltipEl.offsetWidth - 12;
-  const maxTop = window.innerHeight - qualityTooltipEl.offsetHeight - 12;
-  const left = Math.min(event.clientX + offsetX, Math.max(12, maxLeft));
-  const top = Math.min(event.clientY + offsetY, Math.max(12, maxTop));
-  qualityTooltipEl.style.left = `${left}px`;
-  qualityTooltipEl.style.top = `${top}px`;
-}
-
-function hideQualityTooltip() {
-  qualityTooltipEl.classList.add('hidden');
 }
 
 function renderQualityMonthCell(row, month) {
@@ -467,7 +379,7 @@ async function openDrgTotalDetail(indicatorKey) {
   });
 }
 
-async function openQualityDetail(indicatorKey, startMonth, endMonth, itemOrder = '', itemLabel = '') {
+async function openQualityDetail(indicatorKey, startMonth, endMonth, itemOrder = '') {
   if (!lastQualityResult) return alert('请先查询质控统计数据');
 
   await openRemoteDetail({
@@ -488,10 +400,9 @@ async function openQualityDetail(indicatorKey, startMonth, endMonth, itemOrder =
       startMonth,
       endMonth,
       department: lastQualityResult.department || '',
-      itemLabel,
     },
     onLoaded: detail => ({
-      title: `${detail.indicator?.name || '指标详情'} - ${formatRangeLabel(startMonth, endMonth)}统计详情`,
+      title: `${detail.indicator?.name || '指标详情'} - 统计详情`,
       status: `${formatRangeLabel(startMonth, endMonth)}，共 ${detail.rows.length} 条记录`,
     }),
   });
@@ -512,9 +423,6 @@ async function openRemoteDetail({ title, statusText, fetcher, meta, onLoaded }) 
     lastDetail = detail;
     renderDetail(detail);
     const ui = onLoaded(detail);
-    if (meta?.view === 'quality') {
-      ui.title = buildQualityDetailTitle(detail.indicator?.name || '鎸囨爣璇︽儏', meta.itemLabel || '', meta.startMonth, meta.endMonth);
-    }
     els.detailTitle.textContent = ui.title;
     els.detailStatus.textContent = ui.status;
     els.btnExportDetail.disabled = !detail.rows.length || Boolean(lastDetailMeta?.disableExport);
@@ -565,9 +473,8 @@ function renderDetail(detail) {
       const startMonth = button.dataset.startMonth;
       const endMonth = button.dataset.endMonth;
       const itemOrder = button.dataset.itemOrder || '';
-      const itemLabel = button.dataset.itemLabel || '';
       if (!target) return;
-      await openQualityDetail(target, startMonth, endMonth, itemOrder, itemLabel);
+      await openQualityDetail(target, startMonth, endMonth, itemOrder);
     });
   });
 }
@@ -584,7 +491,6 @@ function renderDetailCell(column, row) {
           data-start-month="${escapeHtml(row.action.startMonth || '')}"
           data-end-month="${escapeHtml(row.action.endMonth || '')}"
           data-item-order="${escapeHtml(row.action.itemOrder || '')}"
-          data-item-label="${escapeHtml(row.action.itemLabel || row.item || '')}"
         >
           ${escapeHtml(row.action.label)}
         </button>
@@ -617,47 +523,16 @@ function closeDetailModal() {
 
 
 function exportCurrentTable() {
-  if (!window.XLSX) {
-    alert('XLSX 导出库未加载，请确认依赖已正确安装。');
-    return;
-  }
-
   if (activeView === 'quality') {
     if (!lastQualityResult?.indicators?.length) return;
-    exportSummaryXlsx({
-      title: '质控统计',
-      department: lastQualityResult.department || '',
-      startMonth: lastQualityResult.startMonth,
-      endMonth: lastQualityResult.endMonth,
-      columns: ['指标名称', '比率', '分子', '分母', ...(lastQualityResult.months || []).map(formatMonthLabel)],
-      rows: (lastQualityResult.indicators || []).map(row => [
-        row.name,
-        row.ratio,
-        row.numerator,
-        row.denominator,
-        ...(lastQualityResult.months || []).map(month => row.months?.[month]?.display || ''),
-      ]),
-      filenamePrefix: '质控统计',
-    });
+    const csv = toQualityCsv(lastQualityResult.months || [], lastQualityResult.indicators);
+    downloadBlob(`\ufeff${csv}`, `quality-stats-${Date.now()}.csv`, 'text/csv;charset=utf-8;');
     return;
   }
 
   if (!lastDrgResult?.data?.length) return;
-  exportSummaryXlsx({
-    title: 'DRG统计',
-    department: lastDrgQuery?.department || '',
-    startMonth: lastDrgQuery?.startMonth || lastDrgResult.startMonth,
-    endMonth: lastDrgQuery?.endMonth || lastDrgResult.endMonth,
-    columns: ['序号', '指标名称', '单位', '总计', ...(lastDrgResult.months || []).map(formatMonthLabel)],
-    rows: (lastDrgResult.data || []).map(row => [
-      row.id,
-      row.name,
-      row.unit || '',
-      row.total,
-      ...(lastDrgResult.months || []).map(month => row.months?.[month] || 0),
-    ]),
-    filenamePrefix: 'DRG统计',
-  });
+  const csv = toDrgCsv(lastDrgResult.months, lastDrgResult.data);
+  downloadBlob(`\ufeff${csv}`, `icu-stats-${Date.now()}.csv`, 'text/csv;charset=utf-8;');
 }
 
 function exportDetailXlsx(detail, meta) {
@@ -678,13 +553,10 @@ function exportDetailXlsx(detail, meta) {
   const rangeText = meta.startMonth === meta.endMonth ? meta.startMonth : `${meta.startMonth} 至 ${meta.endMonth}`;
   const generatedAt = new Date().toLocaleString('zh-CN', { hour12: false });
   const title = `${indicatorName}统计详情`;
-  const itemLabel = meta.itemLabel || '';
-  const exportTitle = itemLabel ? `${indicatorName}-${itemLabel}统计详情` : `${indicatorName}统计详情`;
-  const exportSheetName = itemLabel ? `${indicatorName}-${itemLabel}` : indicatorName;
   const header = exportColumns.map(col => col.title);
   const body = exportRows.map(row => exportColumns.map(col => row[col.key] ?? ''));
   const metaRows = [
-    [exportTitle],
+    [title],
     [`统计范围：${rangeText}`],
     [`科室：${meta.department || '全部科室'}    记录数：${exportRows.length}    导出时间：${generatedAt}`],
     [],
@@ -718,65 +590,13 @@ function exportDetailXlsx(detail, meta) {
 
   const wb = XLSX.utils.book_new();
   wb.Props = {
-    Title: exportTitle,
+    Title: title,
     Subject: rangeText,
     Author: 'ICU重症医学科指标统计',
     CreatedDate: new Date(),
   };
-  XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(exportSheetName));
-  XLSX.writeFile(wb, `${sanitizeFileName(exportSheetName)}-${meta.startMonth}_${meta.endMonth}.xlsx`);
-}
-
-function exportSummaryXlsx({ title, department, startMonth, endMonth, columns, rows, filenamePrefix }) {
-  const generatedAt = new Date().toLocaleString('zh-CN', { hour12: false });
-  const rangeText = startMonth && endMonth ? (startMonth === endMonth ? startMonth : `${startMonth} 至 ${endMonth}`) : '';
-  const metaRows = [
-    [title],
-    [`统计范围：${rangeText}`],
-    [`科室：${department || '全部科室'}    记录数：${rows.length}    导出时间：${generatedAt}`],
-    [],
-  ];
-  const aoa = [...metaRows, columns, ...rows];
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  const headerRowIndex = metaRows.length;
-  const lastColumnIndex = Math.max(columns.length - 1, 0);
-
-  ws['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: lastColumnIndex } },
-    { s: { r: 1, c: 0 }, e: { r: 1, c: lastColumnIndex } },
-    { s: { r: 2, c: 0 }, e: { r: 2, c: lastColumnIndex } },
-  ];
-  ws['!cols'] = columns.map((column, columnIndex) => ({
-    wch: Math.min(36, Math.max(
-      getDisplayWidth(column) + 4,
-      ...rows.slice(0, 200).map(row => getDisplayWidth(row[columnIndex]) + 2),
-    )),
-  }));
-  ws['!rows'] = aoa.map((_, index) => ({
-    hpt: index === 0 ? 28 : index === headerRowIndex ? 24 : 20,
-  }));
-
-  if (rows.length && columns.length) {
-    ws['!autofilter'] = {
-      ref: XLSX.utils.encode_range({
-        s: { r: headerRowIndex, c: 0 },
-        e: { r: headerRowIndex + rows.length, c: lastColumnIndex },
-      }),
-    };
-  }
-
-  ws['!freeze'] = { xSplit: 0, ySplit: headerRowIndex + 1 };
-  applyDetailSheetStyles(ws, aoa, headerRowIndex, lastColumnIndex);
-
-  const wb = XLSX.utils.book_new();
-  wb.Props = {
-    Title: title,
-    Subject: rangeText,
-    Author: 'ICU统计',
-    CreatedDate: new Date(),
-  };
-  XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(title));
-  XLSX.writeFile(wb, `${sanitizeFileName(filenamePrefix)}-${startMonth || 'all'}_${endMonth || 'all'}.xlsx`);
+  XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(indicatorName));
+  XLSX.writeFile(wb, `${sanitizeFileName(indicatorName)}-${meta.startMonth}_${meta.endMonth}.xlsx`);
 }
 
 function buildDetailColumnWidths(columns, rows) {
@@ -907,13 +727,6 @@ function sanitizeFileName(value) {
   return String(value || '统计详情').replace(/[\\/:*?"<>|]/g, '_');
 }
 
-function buildQualityDetailTitle(indicatorName, itemLabel, startMonth, endMonth) {
-  const parts = [indicatorName];
-  if (itemLabel) parts.push(itemLabel);
-  parts.push(`${formatDetailPeriodLabel(startMonth, endMonth)}统计详情`);
-  return parts.join('-');
-}
-
 function formatNumber(value) {
   return Number(value || 0).toLocaleString('zh-CN');
 }
@@ -979,12 +792,6 @@ function formatRangeLabel(startMonth, endMonth) {
   return `${formatMonthLabel(startMonth)}-${formatMonthLabel(endMonth)}`;
 }
 
-function formatDetailPeriodLabel(startMonth, endMonth) {
-  if (!startMonth || !endMonth) return '统计';
-  if (startMonth === endMonth) return `${formatMonthLabel(startMonth)}份`;
-  return `${formatMonthLabel(startMonth)}-${formatMonthLabel(endMonth)}`;
-}
-
 function formatMonthLabel(monthValue) {
   const [year, month] = String(monthValue).split('-');
   if (!year || !month) return monthValue;
@@ -994,7 +801,7 @@ function formatMonthLabel(monthValue) {
 function initializeDefaultFilters() {
   const now = new Date();
   const endMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const startMonth = new Date(now.getFullYear(), now.getMonth() - 4, 1);
+  const startMonth = new Date(now.getFullYear(), now.getMonth() - 2, 1);
 
   els.year.value = String(now.getFullYear());
   els.startMonth.value = formatInputMonth(startMonth);
