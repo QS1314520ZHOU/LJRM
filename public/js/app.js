@@ -3,6 +3,7 @@ const API_BASE = '/api/stats';
 const els = {
   btnTabQuality: document.getElementById('btnTabQuality'),
   btnTabDrg: document.getElementById('btnTabDrg'),
+  btnTabNutrition: document.getElementById('btnTabNutrition'),
   year: document.getElementById('year'),
   department: document.getElementById('department'),
   startMonth: document.getElementById('startMonth'),
@@ -23,6 +24,13 @@ const els = {
   btnOkDetail: document.getElementById('btnOkDetail'),
   btnCancelDetail: document.getElementById('btnCancelDetail'),
   btnExportDetail: document.getElementById('btnExportDetail'),
+  dailySection: document.getElementById('dailySection'),
+  dailyStartDate: document.getElementById('dailyStartDate'),
+  dailyEndDate: document.getElementById('dailyEndDate'),
+  btnDailyQuery: document.getElementById('btnDailyQuery'),
+  dailyStatus: document.getElementById('dailyStatus'),
+  dailyHead: document.getElementById('dailyHead'),
+  dailyBody: document.getElementById('dailyBody'),
 };
 
 const statsTable = document.getElementById('statsTable');
@@ -34,6 +42,10 @@ let lastDrgStatus = { text: '请选择条件后查询', isError: false };
 let lastQualityResult = null;
 let lastQualityQuery = null;
 let lastQualityStatus = { text: '请选择条件后查询', isError: false };
+let lastNutritionResult = null;
+let lastNutritionQuery = null;
+let lastNutritionStatus = { text: '请选择条件后查询', isError: false };
+let lastDailyResult = null;
 let lastDetail = null;
 let lastDetailMeta = null;
 let detailHistory = [];   // 详情弹窗的层级栈，[{ openArgs, detail, meta, title, status }, ...]
@@ -93,9 +105,11 @@ document.body.appendChild(qualityTooltipEl);
 
 els.btnTabQuality.addEventListener('click', () => switchView('quality'));
 els.btnTabDrg.addEventListener('click', () => switchView('drg'));
+els.btnTabNutrition?.addEventListener('click', () => switchView('nutrition'));
 els.btnYearQuery.addEventListener('click', () => handleQuery('year'));
 els.btnRangeQuery.addEventListener('click', () => handleQuery('range'));
 els.btnExport.addEventListener('click', exportCurrentTable);
+els.btnDailyQuery?.addEventListener('click', () => queryDaily());
 
 // × 和 确定：直接全部关闭
 [els.btnCloseDetail, els.btnOkDetail].forEach(btn => {
@@ -133,6 +147,15 @@ async function handleQuery(mode) {
       return;
     }
 
+    if (activeView === 'nutrition') {
+      await queryNutrition({
+        url: `${API_BASE}/nutrition/year?year=${encodeURIComponent(year)}&department=${encodeURIComponent(department)}`,
+        title: `年度统计：${year}年`,
+        query: { mode, year, department, startMonth: `${year}-01`, endMonth: `${year}-12` },
+      });
+      return;
+    }
+
     await queryDrg({
       url: `${API_BASE}/year?year=${encodeURIComponent(year)}&department=${encodeURIComponent(department)}`,
       title: `年度统计：${year}年`,
@@ -154,6 +177,15 @@ async function handleQuery(mode) {
 
   if (activeView === 'quality') {
     await queryQuality({ mode, startMonth, endMonth, department });
+    return;
+  }
+
+  if (activeView === 'nutrition') {
+    await queryNutrition({
+      url: `${API_BASE}/nutrition/range?startMonth=${encodeURIComponent(startMonth)}&endMonth=${encodeURIComponent(endMonth)}&department=${encodeURIComponent(department)}`,
+      title: `月份统计：${startMonth} 至 ${endMonth}`,
+      query: { mode, startMonth, endMonth, department },
+    });
     return;
   }
 
@@ -615,6 +647,242 @@ function closeDetailModal() {
   detailHistory = [];   // 关闭时清空层级栈
 }
 
+// ── 营养统计 ──────────────────────────────────────────
+
+async function queryNutrition({ url, title, query }) {
+  setLoading(true);
+  setStatus('正在查询营养统计，请稍候...');
+
+  try {
+    const resp = await fetch(url);
+    const json = await resp.json();
+    if (!resp.ok || json.code !== 200) throw new Error(json.msg || '查询失败');
+
+    lastNutritionResult = json.data;
+    lastNutritionQuery = {
+      ...query,
+      startMonth: json.data.startMonth || query.startMonth,
+      endMonth: json.data.endMonth || query.endMonth,
+    };
+    lastNutritionStatus = {
+      text: `${title}，共 ${json.data.months.length} 个月、${json.data.data.length} 个指标。点击总计或月份数据可查看详情。`,
+      isError: false,
+    };
+
+    if (activeView === 'nutrition') {
+      renderNutritionTable(json.data.months, json.data.data);
+      els.btnExport.disabled = !json.data.data?.length;
+      setStatus(lastNutritionStatus.text);
+    }
+  } catch (err) {
+    lastNutritionResult = null;
+    lastNutritionQuery = null;
+    lastNutritionStatus = { text: `营养统计查询失败：${err.message}`, isError: true };
+
+    if (activeView === 'nutrition') {
+      renderNutritionTable([], []);
+      els.btnExport.disabled = true;
+      setStatus(lastNutritionStatus.text, true);
+    }
+  } finally {
+    setLoading(false);
+  }
+}
+
+function renderNutritionTable(months, data) {
+  statsTable.classList.remove('is-quality');
+  statsTable.classList.add('is-drg');
+
+  els.tableHead.innerHTML = `
+    <th>序号</th>
+    <th>指标名称</th>
+    <th>单位</th>
+    <th>总计</th>
+    ${months.map(month => `<th>${escapeHtml(formatMonthLabel(month))}</th>`).join('')}
+  `;
+
+  if (!data.length) {
+    els.tableBody.innerHTML = `<tr><td colspan="${4 + months.length}" class="empty">暂无数据</td></tr>`;
+    return;
+  }
+
+  els.tableBody.innerHTML = data.map(row => `
+    <tr>
+      <td>${row.id}</td>
+      <td class="name-cell">${escapeHtml(row.name)}</td>
+      <td>${escapeHtml(row.unit || '')}</td>
+      <td class="total-cell total-detail-trigger" data-key="${escapeHtml(row.key)}" title="点击查看总计详情">${formatNumber(row.total)}</td>
+      ${months.map(month => `
+        <td class="month-detail-trigger" data-key="${escapeHtml(row.key)}" data-month="${escapeHtml(month)}" title="点击查看 ${escapeHtml(month)} 详情">
+          ${formatNumber(row.months?.[month] || 0)}
+        </td>
+      `).join('')}
+    </tr>
+  `).join('');
+
+  els.tableBody.querySelectorAll('.month-detail-trigger').forEach(cell => {
+    cell.addEventListener('click', () => openNutritionMonthDetail(cell.dataset.key, cell.dataset.month));
+  });
+
+  els.tableBody.querySelectorAll('.total-detail-trigger').forEach(cell => {
+    cell.addEventListener('click', () => openNutritionTotalDetail(cell.dataset.key));
+  });
+}
+
+async function openNutritionMonthDetail(indicatorKey, month) {
+  if (!lastNutritionQuery) return alert('请先查询营养统计数据');
+
+  await openRemoteDetail({
+    title: '统计详情',
+    statusText: '正在加载详情...',
+    fetcher: () => fetchDetail(`${API_BASE}/nutrition/detail`, {
+      indicatorKey,
+      startMonth: month,
+      endMonth: month,
+      department: lastNutritionQuery.department || '',
+    }),
+    meta: {
+      view: 'nutrition',
+      startMonth: month,
+      endMonth: month,
+      department: lastNutritionQuery.department || '',
+    },
+    onLoaded: detail => {
+      const indicatorName = detail.indicator?.name || '统计详情';
+      return {
+        title: `${indicatorName} - 统计详情`,
+        status: `${month}，共 ${detail.rows.length} 条记录`,
+      };
+    },
+  });
+}
+
+async function openNutritionTotalDetail(indicatorKey) {
+  if (!lastNutritionQuery || !lastNutritionResult) return alert('请先查询营养统计数据');
+  const months = (lastNutritionResult.months || []).filter(month => month >= lastNutritionQuery.startMonth && month <= lastNutritionQuery.endMonth);
+  if (!months.length) return;
+
+  await openRemoteDetail({
+    title: '总计详情',
+    statusText: '正在加载总计详情...',
+    fetcher: async () => {
+      const details = await Promise.all(months.map(async month => ({
+        month,
+        detail: await fetchDetail(`${API_BASE}/nutrition/detail`, {
+          indicatorKey,
+          startMonth: month,
+          endMonth: month,
+          department: lastNutritionQuery.department || '',
+        }),
+      })));
+
+      const firstDetail = details.find(item => item.detail)?.detail || {};
+      const columns = [{ key: 'statMonth', title: '统计月份' }, ...(firstDetail.columns || [])];
+      let index = 1;
+      const rows = details.flatMap(({ month, detail }) => (detail.rows || []).map(row => ({
+        ...row,
+        statMonth: month,
+        index: index++,
+      })));
+
+      return {
+        indicator: firstDetail.indicator,
+        columns,
+        rows,
+      };
+    },
+    meta: {
+      view: 'nutrition',
+      startMonth: lastNutritionQuery.startMonth,
+      endMonth: lastNutritionQuery.endMonth,
+      department: lastNutritionQuery.department || '',
+    },
+    onLoaded: detail => {
+      const indicatorName = detail.indicator?.name || '统计详情';
+      return {
+        title: `${indicatorName} - 总计详情`,
+        status: `${lastNutritionQuery.startMonth} 至 ${lastNutritionQuery.endMonth}，共 ${detail.rows.length} 条记录`,
+      };
+    },
+  });
+}
+
+// ── 每日肠内营养 ──────────────────────────────────────
+
+async function queryDaily() {
+  const startDate = els.dailyStartDate.value;
+  const endDate = els.dailyEndDate.value;
+  if (!startDate || !endDate) return alert('请选择日期范围');
+  if (startDate > endDate) return alert('开始日期不能晚于结束日期');
+
+  const department = els.department.value;
+  els.dailyStatus.textContent = '正在查询每日肠内营养数据...';
+  els.dailyStatus.classList.remove('error');
+
+  try {
+    const url = `${API_BASE}/nutrition/daily?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}&department=${encodeURIComponent(department)}`;
+    const resp = await fetch(url);
+    const json = await resp.json();
+    if (!resp.ok || json.code !== 200) throw new Error(json.msg || '查询失败');
+
+    lastDailyResult = json.data;
+    renderDailyTable(json.data.days, json.data.data);
+    els.dailyStatus.textContent = `${startDate} 至 ${endDate}，共 ${json.data.days.length} 天。点击日期行可查看当天详情。`;
+    els.dailyStatus.classList.remove('error');
+  } catch (err) {
+    els.dailyStatus.textContent = `每日统计查询失败：${err.message}`;
+    els.dailyStatus.classList.add('error');
+    renderDailyTable([], []);
+  }
+}
+
+function renderDailyTable(days, data) {
+  const countMap = {};
+  data.forEach(item => { countMap[item.date] = item.count; });
+
+  if (!days.length) {
+    els.dailyHead.innerHTML = '<th>日期</th><th>肠内营养使用人数</th>';
+    els.dailyBody.innerHTML = '<tr><td colspan="2" class="empty">暂无数据</td></tr>';
+    return;
+  }
+
+  els.dailyHead.innerHTML = '<th>日期</th><th>肠内营养使用人数</th>';
+  els.dailyBody.innerHTML = days.map(date => `
+    <tr class="daily-detail-trigger" data-date="${escapeHtml(date)}" title="点击查看 ${escapeHtml(date)} 详情" style="cursor:pointer;">
+      <td>${escapeHtml(date)}</td>
+      <td>${formatNumber(countMap[date] || 0)}</td>
+    </tr>
+  `).join('');
+
+  els.dailyBody.querySelectorAll('.daily-detail-trigger').forEach(row => {
+    row.addEventListener('click', () => openDailyDetail(row.dataset.date));
+  });
+}
+
+async function openDailyDetail(date) {
+  const department = els.department.value;
+
+  await openRemoteDetail({
+    title: '每日详情',
+    statusText: '正在加载每日详情...',
+    fetcher: () => fetchDetail(`${API_BASE}/nutrition/daily/detail`, {
+      date,
+      department,
+    }),
+    meta: {
+      view: 'nutrition-daily',
+      date,
+      startMonth: date,
+      endMonth: date,
+      department,
+    },
+    onLoaded: detail => ({
+      title: `每日肠内营养使用人数(${date}) - 统计详情`,
+      status: `${date}，共 ${detail.rows.length} 条记录`,
+    }),
+  });
+}
+
 
 function exportCurrentTable() {
   if (!window.XLSX) {
@@ -638,6 +906,26 @@ function exportCurrentTable() {
         ...(lastQualityResult.months || []).map(month => row.months?.[month]?.display || ''),
       ]),
       filenamePrefix: '质控统计',
+    });
+    return;
+  }
+
+  if (activeView === 'nutrition') {
+    if (!lastNutritionResult?.data?.length) return;
+    exportSummaryXlsx({
+      title: '营养统计',
+      department: lastNutritionQuery?.department || '',
+      startMonth: lastNutritionQuery?.startMonth || lastNutritionResult.startMonth,
+      endMonth: lastNutritionQuery?.endMonth || lastNutritionResult.endMonth,
+      columns: ['序号', '指标名称', '单位', '总计', ...(lastNutritionResult.months || []).map(formatMonthLabel)],
+      rows: (lastNutritionResult.data || []).map(row => [
+        row.id,
+        row.name,
+        row.unit || '',
+        row.total,
+        ...(lastNutritionResult.months || []).map(month => row.months?.[month] || 0),
+      ]),
+      filenamePrefix: '营养统计',
     });
     return;
   }
@@ -944,12 +1232,28 @@ function switchView(view) {
   closeDetailModal();
   els.btnTabQuality.classList.toggle('active', view === 'quality');
   els.btnTabDrg.classList.toggle('active', view === 'drg');
+  els.btnTabNutrition?.classList.toggle('active', view === 'nutrition');
+
+  // 每日子模块仅在营养统计视图显示
+  if (els.dailySection) els.dailySection.style.display = view === 'nutrition' ? '' : 'none';
 
   if (view === 'quality') {
     if (lastQualityResult?.indicators?.length) {
       renderQualityTable(lastQualityResult.indicators);
       els.btnExport.disabled = false;
       setStatus(lastQualityStatus.text, lastQualityStatus.isError);
+      return;
+    }
+
+    void handleQuery('range');
+    return;
+  }
+
+  if (view === 'nutrition') {
+    if (lastNutritionResult?.data?.length) {
+      renderNutritionTable(lastNutritionResult.months, lastNutritionResult.data);
+      els.btnExport.disabled = false;
+      setStatus(lastNutritionStatus.text, lastNutritionStatus.isError);
       return;
     }
 
@@ -999,6 +1303,19 @@ function initializeDefaultFilters() {
   els.year.value = String(now.getFullYear());
   els.startMonth.value = formatInputMonth(startMonth);
   els.endMonth.value = formatInputMonth(endMonth);
+
+  // 每日肠内营养默认最近7天
+  const today = new Date();
+  const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+  if (els.dailyEndDate) els.dailyEndDate.value = formatInputDate(today);
+  if (els.dailyStartDate) els.dailyStartDate.value = formatInputDate(weekAgo);
+}
+
+function formatInputDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function formatInputMonth(date) {

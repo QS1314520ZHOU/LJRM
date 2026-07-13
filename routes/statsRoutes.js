@@ -1,6 +1,7 @@
 const express = require('express');
 const statsService = require('../services/statsService');
 const qualityService = require('../services/qualityService');
+const nutritionService = require('../services/nutritionService');
 
 const router = express.Router();
 
@@ -68,6 +69,64 @@ router.get('/quality/detail', async (req, res) => {
     const { indicatorKey, year, startMonth, endMonth, department = '', itemOrder } = req.query;
     if (!indicatorKey) throw new Error('指标参数缺失');
     const data = await qualityService.getQualityDetail(indicatorKey, { year, startMonth, endMonth, department, itemOrder });
+    ok(res, data);
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+// ── 营养统计 ──────────────────────────────────────────
+
+router.get('/nutrition/year', async (req, res) => {
+  try {
+    const { year, department = '' } = req.query;
+    if (!year) throw new Error('年份参数缺失');
+    const data = await nutritionService.getYearStats(year, department);
+    ok(res, data);
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+router.get('/nutrition/range', async (req, res) => {
+  try {
+    const { startMonth, endMonth, department = '' } = req.query;
+    if (!startMonth || !endMonth) throw new Error('月份参数缺失');
+    const data = await nutritionService.getRangeStats(startMonth, endMonth, department);
+    ok(res, data);
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+router.get('/nutrition/detail', async (req, res) => {
+  try {
+    const { indicatorKey, startMonth, endMonth, department = '' } = req.query;
+    if (!indicatorKey) throw new Error('指标参数缺失');
+    if (!startMonth || !endMonth) throw new Error('月份参数缺失');
+    const data = await nutritionService.getDetail(indicatorKey, startMonth, endMonth, department);
+    ok(res, data);
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+router.get('/nutrition/daily/detail', async (req, res) => {
+  try {
+    const { date, department = '' } = req.query;
+    if (!date) throw new Error('日期参数缺失');
+    const data = await nutritionService.getDailyEnteralDetail(date, department);
+    ok(res, data);
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+router.get('/nutrition/daily', async (req, res) => {
+  try {
+    const { startDate, endDate, department = '' } = req.query;
+    if (!startDate || !endDate) throw new Error('日期参数缺失');
+    const data = await nutritionService.getDailyEnteral(startDate, endDate, department);
     ok(res, data);
   } catch (err) {
     fail(res, err);

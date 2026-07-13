@@ -16,8 +16,10 @@ label { display: flex; flex-direction: column; gap: 6px; color: #12253c; font-si
 .select, .input { height: 38px; padding: 0 14px; border: 1px solid #cbd6e6; border-radius: 8px; font-size: 15px; background: #fff; color: #000; outline: none; }
 .select:focus, .input:focus { border-color: #407cff; box-shadow: 0 0 0 3px rgba(64, 124, 255, .12); }
 .select { width: 188px; }
-.input { width: 154px; }
-input[type="month"].input { width: 156px; }
+.input { width: 154px; cursor: pointer; }
+input[type="month"].input { width: 172px; }
+input[type="date"].input { width: 160px; }
+input[type="number"].input { width: 154px; }
 
 .btn-primary, .btn-secondary, .btn-light, .btn-ghost { height: 38px; padding: 0 22px; border-radius: 8px; cursor: pointer; font-size: 15px; transition: .15s ease; white-space: nowrap; }
 .btn-primary { background: #407cff; color: #fff; border: none; font-weight: 600; }
@@ -158,6 +160,49 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 .table-wrapper {
   max-height: calc(100vh - 228px);
   padding: 16px 20px 18px;
+}
+
+/* 营养统计 - 每日子模块 */
+.daily-section {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 2px solid #d0def2;
+}
+
+.daily-section .daily-card {
+  padding: 14px 20px;
+  margin-bottom: 6px;
+}
+
+.daily-table-wrapper {
+  max-height: calc(100vh - 780px);
+  min-height: 120px;
+}
+
+#dailyTable {
+  width: 100%;
+  min-width: 400px;
+  table-layout: fixed;
+}
+
+#dailyTable th:nth-child(1),
+#dailyTable td:nth-child(1) {
+  width: 200px;
+  min-width: 200px;
+}
+
+#dailyTable th:nth-child(2),
+#dailyTable td:nth-child(2) {
+  width: 200px;
+  min-width: 200px;
+}
+
+.daily-detail-trigger:hover {
+  color: #124ee8 !important;
+  background: #eaf4ff !important;
+  outline: 2px solid #ff4d57;
+  outline-offset: -5px;
+  font-weight: 700;
 }
 
 @media (max-width: 1180px) {

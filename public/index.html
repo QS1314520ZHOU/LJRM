@@ -12,6 +12,7 @@
       <div class="view-tabs" aria-label="统计视图切换">
         <button class="view-tab active" id="btnTabQuality" type="button">质控统计</button>
         <button class="view-tab" id="btnTabDrg" type="button">DRG统计</button>
+        <button class="view-tab" id="btnTabNutrition" type="button">营养统计</button>
       </div>
       <button class="btn-secondary" id="btnExport" disabled>导出Excel</button>
     </header>
@@ -61,6 +62,38 @@
         </tbody>
       </table>
     </div>
+
+    <!-- 每日肠内营养统计（营养统计 Tab 内独立子模块） -->
+    <section id="dailySection" class="daily-section" style="display:none;">
+      <div class="daily-card filter-card">
+        <div class="filter-row filter-row-one">
+          <label>
+            开始日期
+            <input type="date" id="dailyStartDate" class="input" />
+          </label>
+          <span class="separator">—</span>
+          <label>
+            结束日期
+            <input type="date" id="dailyEndDate" class="input" />
+          </label>
+          <button class="btn-primary" id="btnDailyQuery">查询每日用量</button>
+        </div>
+      </div>
+      <div id="dailyStatus" class="status">请选择日期范围后查询</div>
+      <div class="table-wrapper daily-table-wrapper">
+        <table id="dailyTable" class="stats-table is-drg">
+          <thead>
+            <tr id="dailyHead">
+              <th>日期</th>
+              <th>肠内营养使用人数</th>
+            </tr>
+          </thead>
+          <tbody id="dailyBody">
+            <tr><td colspan="2" class="empty">暂无数据，请点击查询</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </div>
 
   <div id="detailModal" class="modal hidden">
