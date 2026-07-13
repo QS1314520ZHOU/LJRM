@@ -862,6 +862,9 @@ function renderDailyTable(days, data) {
 async function openDailyDetail(date) {
   const department = els.department.value;
 
+  // 从每日统计结果中取当天人数
+  const dailyCount = lastDailyResult?.data?.find(d => d.date === date)?.count;
+
   await openRemoteDetail({
     title: '每日详情',
     statusText: '正在加载每日详情...',
@@ -875,6 +878,7 @@ async function openDailyDetail(date) {
       startMonth: date,
       endMonth: date,
       department,
+      dailyCount,
     },
     onLoaded: detail => ({
       title: `每日肠内营养使用人数(${date}) - 统计详情`,
@@ -971,10 +975,11 @@ function exportDetailXlsx(detail, meta) {
   const exportSheetName = itemLabel ? `${indicatorName}-${itemLabel}` : indicatorName;
   const header = exportColumns.map(col => col.title);
   const body = exportRows.map(row => exportColumns.map(col => row[col.key] ?? ''));
+  const dailyCountText = meta.dailyCount != null ? `日统计人数：${meta.dailyCount}    ` : '';
   const metaRows = [
     [exportTitle],
     [`统计范围：${rangeText}`],
-    [`科室：${meta.department || '全部科室'}    记录数：${exportRows.length}    导出时间：${generatedAt}`],
+    [`科室：${meta.department || '全部科室'}    ${dailyCountText}明细条数：${exportRows.length}    导出时间：${generatedAt}`],
     [],
   ];
   const aoa = [...metaRows, header, ...body];
