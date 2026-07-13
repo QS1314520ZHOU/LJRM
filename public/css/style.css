@@ -170,6 +170,15 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 }
 
 /* 营养统计 - 每日子模块 */
+.daily-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.daily-status-row .status { min-height: 28px; flex: 1; }
+
 .daily-section {
   margin-top: 32px;
   padding-top: 20px;

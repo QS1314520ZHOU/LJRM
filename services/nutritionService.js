@@ -522,6 +522,90 @@ async function getDailyEnteralDetail(dateStr, department = '') {
   };
 }
 
+// ── 日期范围批量明细（一键导出用）────────────────────
+
+async function getDailyEnteralRangeDetail(startDateStr, endDateStr, department = '') {
+  validateDate(startDateStr, '开始日期');
+  validateDate(endDateStr, '结束日期');
+  const days = buildDateList(startDateStr, endDateStr);
+
+  const overallStart = moment.parseZone(`${days[0]}T00:00:00+08:00`).toDate();
+  const overallEnd = moment.parseZone(`${days[days.length - 1]}T23:59:59.999+08:00`).toDate();
+  const keywordOr = buildKeywordRegexOr(ENTERAL_KEYWORDS);
+
+  const match = {
+    status: { $ne: 'invalid' },
+    startTime: { $gte: overallStart, $lte: overallEnd },
+    $or: keywordOr,
+  };
+
+  if (department && process.env.ENABLE_DEPT_FILTER === 'true') {
+    const pids = await getDepartmentPatientIds(department);
+    if (!pids.length) {
+      return { columns: DAILY_DETAIL_COLUMNS, rows: [] };
+    }
+    match.pid = { $in: pids };
+  }
+
+  const drugRecords = await DrugExe.find(match)
+    .select('pid liquidAmount liquidAmountUnit startTime drugList')
+    .lean();
+
+  if (!drugRecords.length) {
+    return { columns: DAILY_DETAIL_COLUMNS, rows: [] };
+  }
+
+  const pids = [...new Set(drugRecords.map(r => normalizeText(r.pid)))];
+  const patients = await Patient.find(buildPatientFilter({ _id: { $in: pids } }, department))
+    .select(PATIENT_SELECT)
+    .lean();
+  const patientMap = new Map(patients.map(p => [String(p._id), p]));
+
+  const rows = drugRecords
+    .map((record) => {
+      const patient = patientMap.get(normalizeText(record.pid));
+      const base = patient ? toDetailRow(patient, 0) : null;
+      const drugNames = (record.drugList || [])
+        .map(d => d.name || '')
+        .filter(Boolean)
+        .join('、');
+      const statDate = moment(record.startTime).utcOffset(EAST_8_OFFSET_MINUTES).format('YYYY-MM-DD');
+      return {
+        statDate,
+        department: base?.department || '',
+        bedNo: base?.bedNo || '',
+        name: base?.name || '',
+        age: base?.age || '',
+        hospitalNo: base?.hospitalNo || '',
+        icuAdmissionTime: base?.icuAdmissionTime || '',
+        icuDischargeTime: base?.icuDischargeTime || '',
+        icuDays: base?.icuDays || '',
+        drugNames: drugNames || '',
+        liquidAmount: record.liquidAmount ?? '',
+        liquidAmountUnit: record.liquidAmountUnit ?? '',
+        admissionDoctor: base?.admissionDoctor || '',
+        attendingDoctor: base?.attendingDoctor || '',
+        admissionSource: base?.admissionSource || '',
+        dischargeType: base?.dischargeType || '',
+        transferDept: base?.transferDept || '',
+        diagnosis: base?.diagnosis || '',
+        _sortTime: patient ? asDate(patient.icuAdmissionTime) : null,
+      };
+    })
+    .sort((a, b) => {
+      if (!a._sortTime && !b._sortTime) return 0;
+      if (!a._sortTime) return 1;
+      if (!b._sortTime) return -1;
+      return a._sortTime - b._sortTime;
+    })
+    .map((row, idx) => ({ ...row, index: idx + 1 }));
+
+  return {
+    columns: [{ key: 'index', title: '序号' }, { key: 'statDate', title: '统计日期' }, ...DAILY_DETAIL_COLUMNS.slice(1)],
+    rows,
+  };
+}
+
 module.exports = {
   NUTRITION_INDICATORS,
   ENTERAL_KEYWORDS,
@@ -531,4 +615,5 @@ module.exports = {
   getDetail,
   getDailyEnteral,
   getDailyEnteralDetail,
+  getDailyEnteralRangeDetail,
 };

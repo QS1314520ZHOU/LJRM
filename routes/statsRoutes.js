@@ -111,6 +111,17 @@ router.get('/nutrition/detail', async (req, res) => {
   }
 });
 
+router.get('/nutrition/daily/detail/range', async (req, res) => {
+  try {
+    const { startDate, endDate, department = '' } = req.query;
+    if (!startDate || !endDate) throw new Error('日期参数缺失');
+    const data = await nutritionService.getDailyEnteralRangeDetail(startDate, endDate, department);
+    ok(res, data);
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
 router.get('/nutrition/daily/detail', async (req, res) => {
   try {
     const { date, department = '' } = req.query;
