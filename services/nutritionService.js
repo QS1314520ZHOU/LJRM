@@ -38,6 +38,7 @@ const DAILY_DETAIL_COLUMNS = [
   { key: 'bedNo', title: '床号' },
   { key: 'name', title: '姓名' },
   { key: 'hospitalNo', title: '住院号' },
+  { key: 'drugNames', title: '药名' },
   { key: 'liquidAmount', title: '剂量(mL)' },
   { key: 'liquidAmountUnit', title: '单位' },
 ];
@@ -442,7 +443,7 @@ async function getDailyEnteralDetail(dateStr, department = '') {
   }
 
   const drugRecords = await DrugExe.find(match)
-    .select('pid liquidAmount liquidAmountUnit startTime')
+    .select('pid liquidAmount liquidAmountUnit startTime drugList')
     .lean();
 
   if (!drugRecords.length) {
@@ -463,12 +464,17 @@ async function getDailyEnteralDetail(dateStr, department = '') {
   const rows = drugRecords.map((record, idx) => {
     const patient = patientMap.get(normalizeText(record.pid));
     const base = patient ? toDetailRow(patient, idx + 1) : { index: idx + 1, department: '', bedNo: '', name: '', hospitalNo: '' };
+    const drugNames = (record.drugList || [])
+      .map(d => d.name || '')
+      .filter(Boolean)
+      .join('、');
     return {
       index: idx + 1,
       department: base.department || '',
       bedNo: base.bedNo || '',
       name: base.name || '',
       hospitalNo: base.hospitalNo || '',
+      drugNames: drugNames || '',
       liquidAmount: record.liquidAmount ?? '',
       liquidAmountUnit: record.liquidAmountUnit ?? '',
     };
