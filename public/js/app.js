@@ -886,56 +886,18 @@ async function exportDailyDetailRange() {
     if (!detail.rows.length) return alert('无数据可导出');
 
     const exportColumns = detail.columns.filter(col => col.key !== '_sortTime');
-    const exportRows = detail.rows;
+    const header = exportColumns.map(col => col.title);
     const generatedAt = new Date().toLocaleString('zh-CN', { hour12: false });
     const rangeText = startDate === endDate ? startDate : `${startDate} 至 ${endDate}`;
 
-    // 计算每日汇总
-    const dailySummary = {};
-    exportRows.forEach(row => {
+    // 按天分组
+    const dayGroups = {};
+    detail.rows.forEach(row => {
       const d = row.statDate;
-      if (!dailySummary[d]) dailySummary[d] = new Set();
-      dailySummary[d].add(row.name + row.hospitalNo);
+      if (!dayGroups[d]) dayGroups[d] = [];
+      dayGroups[d].push(row);
     });
-    const totalPeople = [...new Set(exportRows.map(r => r.name + r.hospitalNo))].length;
-    const summaryLines = Object.keys(dailySummary).sort().map(d =>
-      `${d}：${dailySummary[d].size}人`
-    ).join('    ');
-
-    const header = exportColumns.map(col => col.title);
-    const body = exportRows.map(row => exportColumns.map(col => row[col.key] ?? ''));
-    const metaRows = [
-      [`每日肠内营养明细导出`],
-      [`统计范围：${rangeText}    总人次：${totalPeople}    明细条数：${exportRows.length}    导出时间：${generatedAt}`],
-      [`每日人数：${summaryLines}`],
-      [],
-    ];
-
-    const aoa = [...metaRows, header, ...body];
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    const headerRowIndex = metaRows.length;
-    const lastColumnIndex = Math.max(exportColumns.length - 1, 0);
-
-    ws['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: lastColumnIndex } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: lastColumnIndex } },
-      { s: { r: 2, c: 0 }, e: { r: 2, c: lastColumnIndex } },
-    ];
-    ws['!cols'] = exportColumns.map(col => {
-      const titleWidth = getDisplayWidth(col.title) + 4;
-      const sampleWidth = exportRows.slice(0, 200).reduce((max, row) => Math.max(max, getDisplayWidth(row[col.key])), 0) + 2;
-      return { wch: Math.min(30, Math.max(8, titleWidth, sampleWidth)) };
-    });
-    ws['!freeze'] = { xSplit: 0, ySplit: headerRowIndex + 1 };
-
-    if (exportRows.length && exportColumns.length) {
-      ws['!autofilter'] = {
-        ref: XLSX.utils.encode_range({
-          s: { r: headerRowIndex, c: 0 },
-          e: { r: headerRowIndex + exportRows.length, c: lastColumnIndex },
-        }),
-      };
-    }
+    const sortedDays = Object.keys(dayGroups).sort();
 
     const wb = XLSX.utils.book_new();
     wb.Props = {
@@ -944,10 +906,45 @@ async function exportDailyDetailRange() {
       Author: 'ICU统计',
       CreatedDate: new Date(),
     };
-    XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName('每日肠内营养明细'));
+
+    let totalPeopleSet = new Set();
+    let totalRows = 0;
+
+    sortedDays.forEach(date => {
+      const dayRows = dayGroups[date];
+      const people = new Set(dayRows.map(r => r.name + r.hospitalNo)).size;
+      totalPeopleSet = new Set([...totalPeopleSet, ...new Set(dayRows.map(r => r.name + r.hospitalNo))]);
+      totalRows += dayRows.length;
+
+      const metaRows = [
+        [`肠内营养明细 - ${date}`],
+        [`科室：${department || '全部科室'}    当日人数：${people}    明细条数：${dayRows.length}    导出时间：${generatedAt}`],
+        [],
+      ];
+      const body = dayRows.map(row => exportColumns.map(col => row[col.key] ?? ''));
+      const aoa = [...metaRows, header, ...body];
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const headerRowIndex = metaRows.length;
+      const lastColumnIndex = Math.max(exportColumns.length - 1, 0);
+
+      ws['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: lastColumnIndex } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: lastColumnIndex } },
+      ];
+      ws['!cols'] = exportColumns.map(col => {
+        const titleWidth = getDisplayWidth(col.title) + 4;
+        const sampleWidth = dayRows.slice(0, 200).reduce((max, row) => Math.max(max, getDisplayWidth(row[col.key])), 0) + 2;
+        return { wch: Math.min(30, Math.max(8, titleWidth, sampleWidth)) };
+      });
+      ws['!freeze'] = { xSplit: 0, ySplit: headerRowIndex + 1 };
+
+      XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(date));
+    });
+
     XLSX.writeFile(wb, `${sanitizeFileName('每日肠内营养明细')}-${startDate}_${endDate}.xlsx`);
 
-    els.dailyStatus.textContent = `导出完成：${startDate} 至 ${endDate}，总 ${totalPeople} 人次，${exportRows.length} 条明细`;
+    els.dailyStatus.textContent = `导出完成：${startDate} 至 ${endDate}，${sortedDays.length} 天，总 ${totalPeopleSet.size} 人次，${totalRows} 条明细`;
+    els.dailyStatus.classList.remove('error');
   } catch (err) {
     els.dailyStatus.textContent = `导出失败：${err.message}`;
     els.dailyStatus.classList.add('error');
