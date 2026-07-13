@@ -439,18 +439,27 @@ async function getDetail(indicatorKey, startMonth, endMonth, department = '') {
       department,
       indicatorKey === 'ventilatorGte96' ? count => count >= 96 : count => count < 96
     );
-    const rows = stats.map((item, idx) => toDetailRow(item.patient, idx + 1, { durationCount: item.count }));
+    const sorted = stats
+      .map(item => ({ patient: item.patient, count: item.count, sortTime: asDate(item.patient.icuAdmissionTime) }))
+      .sort((a, b) => { if (!a.sortTime && !b.sortTime) return 0; if (!a.sortTime) return 1; if (!b.sortTime) return -1; return a.sortTime - b.sortTime; });
+    const rows = sorted.map((item, idx) => toDetailRow(item.patient, idx + 1, { durationCount: item.count }));
     return { indicator, columns, rows };
   }
 
   if (indicatorKey === 'ventilatorCrrt') {
     const stats = await getVentilatorCrrtStatsPatients(startDate, endDate, department);
-    const rows = stats.map((item, idx) => toDetailRow(item.patient, idx + 1, { durationCount: item.count }));
+    const sorted = stats
+      .map(item => ({ patient: item.patient, count: item.count, sortTime: asDate(item.patient.icuAdmissionTime) }))
+      .sort((a, b) => { if (!a.sortTime && !b.sortTime) return 0; if (!a.sortTime) return 1; if (!b.sortTime) return -1; return a.sortTime - b.sortTime; });
+    const rows = sorted.map((item, idx) => toDetailRow(item.patient, idx + 1, { durationCount: item.count }));
     return { indicator, columns, rows };
   }
 
   const patients = await getIndicatorPatients(indicatorKey, startDate, endDate, department);
-  const rows = patients.map((patient, idx) => toDetailRow(patient, idx + 1));
+  const sortedPatients = patients
+    .map(p => ({ patient: p, sortTime: asDate(p.icuAdmissionTime) }))
+    .sort((a, b) => { if (!a.sortTime && !b.sortTime) return 0; if (!a.sortTime) return 1; if (!b.sortTime) return -1; return a.sortTime - b.sortTime; });
+  const rows = sortedPatients.map((item, idx) => toDetailRow(item.patient, idx + 1));
   return { indicator, columns, rows };
 }
 

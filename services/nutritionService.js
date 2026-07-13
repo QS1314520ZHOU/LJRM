@@ -37,10 +37,20 @@ const DAILY_DETAIL_COLUMNS = [
   { key: 'department', title: '科室' },
   { key: 'bedNo', title: '床号' },
   { key: 'name', title: '姓名' },
+  { key: 'age', title: '年龄' },
   { key: 'hospitalNo', title: '住院号' },
+  { key: 'icuAdmissionTime', title: '入科时间' },
+  { key: 'icuDischargeTime', title: '出科时间' },
+  { key: 'icuDays', title: '在科天数' },
   { key: 'drugNames', title: '药名' },
   { key: 'liquidAmount', title: '剂量(mL)' },
   { key: 'liquidAmountUnit', title: '单位' },
+  { key: 'admissionDoctor', title: '收治医生' },
+  { key: 'attendingDoctor', title: '管床医生' },
+  { key: 'admissionSource', title: '入科来源' },
+  { key: 'dischargeType', title: '出科类型' },
+  { key: 'transferDept', title: '转出科室' },
+  { key: 'diagnosis', title: '临床诊断' },
 ];
 
 const SUPPORTED_NUTRITION_KEYS = new Set(NUTRITION_INDICATORS.map(item => item.key));
@@ -348,13 +358,19 @@ async function getDetail(indicatorKey, startMonth, endMonth, department = '') {
     .lean();
 
   const patientMap = new Map(patients.map(p => [String(p._id), p]));
-  const rows = uniquePids
-    .map((pid, idx) => {
-      const patient = patientMap.get(pid);
-      if (!patient) return null;
-      return toDetailRow(patient, idx + 1);
-    })
-    .filter(Boolean);
+
+  // 按入科时间升序排列
+  const sortedPatients = patients
+    .map(p => ({ patient: p, sortTime: asDate(p.icuAdmissionTime) }))
+    .sort((a, b) => {
+      if (!a.sortTime && !b.sortTime) return 0;
+      if (!a.sortTime) return 1;
+      if (!b.sortTime) return -1;
+      return a.sortTime - b.sortTime;
+    });
+
+  const rows = sortedPatients
+    .map((item, idx) => toDetailRow(item.patient, idx + 1));
 
   return { indicator, columns: NUTRITION_DETAIL_COLUMNS, rows };
 }
@@ -460,25 +476,44 @@ async function getDailyEnteralDetail(dateStr, department = '') {
     .lean();
   const patientMap = new Map(patients.map(p => [String(p._id), p]));
 
-  // 分条列出，每条给药记录独立一行
-  const rows = drugRecords.map((record, idx) => {
-    const patient = patientMap.get(normalizeText(record.pid));
-    const base = patient ? toDetailRow(patient, idx + 1) : { index: idx + 1, department: '', bedNo: '', name: '', hospitalNo: '' };
-    const drugNames = (record.drugList || [])
-      .map(d => d.name || '')
-      .filter(Boolean)
-      .join('、');
-    return {
-      index: idx + 1,
-      department: base.department || '',
-      bedNo: base.bedNo || '',
-      name: base.name || '',
-      hospitalNo: base.hospitalNo || '',
-      drugNames: drugNames || '',
-      liquidAmount: record.liquidAmount ?? '',
-      liquidAmountUnit: record.liquidAmountUnit ?? '',
-    };
-  });
+  // 分条列出，每条给药记录独立一行，按入科时间升序
+  const rows = drugRecords
+    .map((record, idx) => {
+      const patient = patientMap.get(normalizeText(record.pid));
+      const base = patient ? toDetailRow(patient, idx + 1) : null;
+      const drugNames = (record.drugList || [])
+        .map(d => d.name || '')
+        .filter(Boolean)
+        .join('、');
+      return {
+        index: idx + 1,
+        department: base?.department || '',
+        bedNo: base?.bedNo || '',
+        name: base?.name || '',
+        age: base?.age || '',
+        hospitalNo: base?.hospitalNo || '',
+        icuAdmissionTime: base?.icuAdmissionTime || '',
+        icuDischargeTime: base?.icuDischargeTime || '',
+        icuDays: base?.icuDays || '',
+        admissionDoctor: base?.admissionDoctor || '',
+        attendingDoctor: base?.attendingDoctor || '',
+        admissionSource: base?.admissionSource || '',
+        dischargeType: base?.dischargeType || '',
+        transferDept: base?.transferDept || '',
+        diagnosis: base?.diagnosis || '',
+        drugNames: drugNames || '',
+        liquidAmount: record.liquidAmount ?? '',
+        liquidAmountUnit: record.liquidAmountUnit ?? '',
+        _sortTime: patient ? asDate(patient.icuAdmissionTime) : null,
+      };
+    })
+    .sort((a, b) => {
+      if (!a._sortTime && !b._sortTime) return 0;
+      if (!a._sortTime) return 1;
+      if (!b._sortTime) return -1;
+      return a._sortTime - b._sortTime;
+    })
+    .map((row, idx) => ({ ...row, index: idx + 1 }));
 
   return {
     indicator: { key: 'dailyEnteral', name: `每日肠内营养使用人数(${dateStr})` },
