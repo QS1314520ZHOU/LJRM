@@ -191,7 +191,7 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 }
 
 .daily-table-wrapper {
-  max-height: calc(100vh - 620px);
+  max-height: calc(100vh - 520px);
   min-height: 120px;
    overflow: auto;
 }
