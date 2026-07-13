@@ -16,10 +16,17 @@ label { display: flex; flex-direction: column; gap: 6px; color: #12253c; font-si
 .select, .input { height: 38px; padding: 0 14px; border: 1px solid #cbd6e6; border-radius: 8px; font-size: 15px; background: #fff; color: #000; outline: none; }
 .select:focus, .input:focus { border-color: #407cff; box-shadow: 0 0 0 3px rgba(64, 124, 255, .12); }
 .select { width: 188px; }
-.input { width: 154px; cursor: pointer; }
+.input { width: 154px; }
 input[type="month"].input { width: 172px; }
 input[type="date"].input { width: 160px; }
 input[type="number"].input { width: 154px; }
+
+/* 时间类输入框：整框可点，hand 光标 */
+input[type="date"],
+input[type="month"],
+input[type="time"],
+input[type="datetime-local"],
+input[type="week"] { cursor: pointer; }
 
 .btn-primary, .btn-secondary, .btn-light, .btn-ghost { height: 38px; padding: 0 22px; border-radius: 8px; cursor: pointer; font-size: 15px; transition: .15s ease; white-space: nowrap; }
 .btn-primary { background: #407cff; color: #fff; border: none; font-weight: 600; }

@@ -1328,3 +1328,14 @@ window.addEventListener('DOMContentLoaded', () => {
   initializeDefaultFilters();
   void handleQuery('range');
 });
+
+// ── 时间输入框 showPicker() 事件委托 ──────────────────
+// 点击框内任意位置（而非仅日历图标）弹出原生选择器
+document.addEventListener('click', (e) => {
+  const input = e.target.closest(
+    'input[type="date"], input[type="month"], input[type="time"], input[type="datetime-local"], input[type="week"]'
+  );
+  if (input && typeof input.showPicker === 'function') {
+    try { input.showPicker(); } catch (err) { /* 已弹出或浏览器不支持时静默忽略 */ }
+  }
+});
