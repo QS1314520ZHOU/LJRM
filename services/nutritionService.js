@@ -376,7 +376,7 @@ async function getGastricTubeMonthlyCounts(startMonth, endMonth, department) {
   // 不加 endTime 日期约束——需要拉取 endTime 为空的记录，后续用 effectiveEndTime 过滤
   const match = {
     type: { $in: GASTRIC_TUBE_TYPES },
-    valid: { $ne: null },
+    valid: { $ne: false },
   };
 
   // 科室过滤
@@ -554,7 +554,7 @@ async function getDetail(indicatorKey, startMonth, endMonth, department = '') {
     // 不加 endTime 日期约束——先拉取全部 type/valid 匹配记录，后续用 effectiveEndTime 过滤
     const match = {
       type: { $in: GASTRIC_TUBE_TYPES },
-      valid: { $ne: null },
+      valid: { $ne: false },
     };
 
     if (department && process.env.ENABLE_DEPT_FILTER === 'true') {
