@@ -228,7 +228,6 @@ function getKeywordsByIndicator(indicatorKey) {
   switch (indicatorKey) {
     case 'enteral': return ENTERAL_KEYWORDS;
     case 'parenteral': return PARENTERAL_KEYWORDS;
-    case 'enteralExec': return ENTERAL_KEYWORDS; // 与 enteral 同关键词，区别在不去重
     default: throw new Error(`不支持的营养指标: ${indicatorKey}`);
   }
 }
@@ -376,19 +375,20 @@ async function getEnteralExecMonthlyCounts(startMonth, endMonth, department) {
 
 // ── 年度 / 范围统计 ───────────────────────────────────
 
-// ── 按 key 分派计数函数 ────────────────────────────────
+// ── 统一分派入口：杜绝参数串位（indicatorKey 始终在第一参数位）─
 
-function getCountFnByKey(indicatorKey) {
+async function getIndicatorMonthlyCounts(indicatorKey, startMonth, endMonth, department) {
   switch (indicatorKey) {
     case 'enteral':
     case 'parenteral':
-      return getMonthlyCounts;      // 按月 + pid 去重
+      // 保持原4参顺序 getMonthlyCounts(startMonth, endMonth, indicatorKey, department)
+      return getMonthlyCounts(startMonth, endMonth, indicatorKey, department);
     case 'gastricTube':
-      return getGastricTubeMonthlyCounts;  // TubeExe 逐条
+      return getGastricTubeMonthlyCounts(startMonth, endMonth, department);
     case 'enteralExec':
-      return getEnteralExecMonthlyCounts;  // DrugExe 逐条
+      return getEnteralExecMonthlyCounts(startMonth, endMonth, department);
     default:
-      throw new Error(`不支持的指标: ${indicatorKey}`);
+      throw new Error(`不支持的营养指标: ${indicatorKey}`);
   }
 }
 
@@ -396,8 +396,7 @@ async function getYearStats(year, department = '') {
   const y = validateYear(year);
   const months = Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`);
   const data = await Promise.all(NUTRITION_INDICATORS.map(async (indicator) => {
-    const countFn = getCountFnByKey(indicator.key);
-    const monthMap = await countFn(`${y}-01`, `${y}-12`, department);
+    const monthMap = await getIndicatorMonthlyCounts(indicator.key, `${y}-01`, `${y}-12`, department);
     const total = Object.values(monthMap).reduce((sum, v) => sum + v, 0);
     return {
       id: indicator.id,
@@ -414,8 +413,7 @@ async function getYearStats(year, department = '') {
 async function getRangeStats(startMonth, endMonth, department = '') {
   const months = buildMonths(startMonth, endMonth);
   const data = await Promise.all(NUTRITION_INDICATORS.map(async (indicator) => {
-    const countFn = getCountFnByKey(indicator.key);
-    const monthMap = await countFn(startMonth, endMonth, department);
+    const monthMap = await getIndicatorMonthlyCounts(indicator.key, startMonth, endMonth, department);
     const total = Object.values(monthMap).reduce((sum, v) => sum + v, 0);
     return {
       id: indicator.id,
