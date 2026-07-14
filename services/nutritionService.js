@@ -16,7 +16,7 @@ const NUTRITION_INDICATORS = [
 
 const ENTERAL_KEYWORDS = ['肠内营养粉剂', '肠内营养混悬液'];
 const PARENTERAL_KEYWORDS = ['脂肪乳氨基酸'];
-const GASTRIC_TUBE_TYPES = ['鼻肠管', '胃肠管'];
+const GASTRIC_TUBE_TYPES = ['鼻肠管', '胃肠管', '胃管'];
 
 const NUTRITION_DETAIL_COLUMNS = [
   { key: 'index', title: '序号' },
