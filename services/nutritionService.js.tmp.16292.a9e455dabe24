@@ -502,8 +502,9 @@ async function getDetail(indicatorKey, startMonth, endMonth, department = '') {
     return { indicator, columns: GASTRIC_TUBE_DETAIL_COLUMNS, rows };
   }
 
-  // ── 肠内实施例数：DrugExe 逐条列出 ──
+  // ── 肠内实施例数：DrugExe 逐条列出（含药名/剂量/单位）──
   if (indicatorKey === 'enteralExec') {
+    const { startDate, endDate } = getFullRange(startMonth, endMonth);
     const keywordOr = buildKeywordRegexOr(ENTERAL_KEYWORDS);
 
     const match = {
