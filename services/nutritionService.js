@@ -293,7 +293,80 @@ async function getMonthlyCounts(startMonth, endMonth, indicatorKey, department) 
   return countMap;
 }
 
-// ── 胃肠管留置例数（TubeExe，endTime 归月，逐条计数）──
+// ── 胃肠管留置例数：接续合并工具 ───────────────────────
+// 同一患者+同一类型下，startTime == endTime 的相邻记录合并为一个留置段(episode)
+// 3 个类型独立建链，不跨类型合并；每个 episode 最终归 1 例
+
+function buildGastricTubeEpisodes(tubeRecords) {
+  // 1. 按 `${pid}::${type}` 分组
+  const groups = new Map();
+  for (const record of tubeRecords) {
+    const pid = normalizeText(record.pid);
+    const type = normalizeText(record.type);
+    if (!pid || !type) continue;
+    const groupKey = `${pid}::${type}`;
+    if (!groups.has(groupKey)) groups.set(groupKey, []);
+    groups.get(groupKey).push(record);
+  }
+
+  const episodes = [];
+
+  for (const [, records] of groups) {
+    // 2. 组内按 startTime 升序（缺失时用 endTime 兜底）
+    records.sort((a, b) => {
+      const aTime = asDate(a.startTime) || asDate(a.endTime);
+      const bTime = asDate(b.startTime) || asDate(b.endTime);
+      if (!aTime && !bTime) return 0;
+      if (!aTime) return 1;
+      if (!bTime) return -1;
+      return aTime - bTime;
+    });
+
+    // 3. 线性扫描合并接续记录
+    let currentEp = null;
+    for (const record of records) {
+      const recStart = asDate(record.startTime);
+      const recEnd = asDate(record.endTime);
+      if (!recEnd) continue; // endTime 为空的不参与 episode（过滤条件已保证，防御性保留）
+
+      if (currentEp) {
+        // 精确相等判定：startTime.getTime() === episode 末端 endTime.getTime()
+        const epEndTime = currentEp.finalEndTime.getTime();
+        const recStartTime = recStart ? recStart.getTime() : null;
+        if (recStartTime !== null && recStartTime === epEndTime) {
+          // 接续 → 合并，更新末端 endTime
+          currentEp.finalEndTime = recEnd;
+          continue;
+        }
+        // 不接续 → 结束当前 episode
+        episodes.push({
+          pid: currentEp.pid,
+          type: currentEp.type,
+          finalEndTime: currentEp.finalEndTime,
+        });
+      }
+
+      // 另起新 episode
+      currentEp = {
+        pid: normalizeText(record.pid),
+        type: normalizeText(record.type),
+        finalEndTime: recEnd,
+      };
+    }
+    // 收尾最后一个 episode
+    if (currentEp) {
+      episodes.push({
+        pid: currentEp.pid,
+        type: currentEp.type,
+        finalEndTime: currentEp.finalEndTime,
+      });
+    }
+  }
+
+  return episodes;
+}
+
+// ── 胃肠管留置例数（TubeExe，endTime 归月，接续合并后计数）──
 
 async function getGastricTubeMonthlyCounts(startMonth, endMonth, department) {
   const months = buildMonths(startMonth, endMonth);
@@ -316,20 +389,29 @@ async function getGastricTubeMonthlyCounts(startMonth, endMonth, department) {
     match.pid = { $in: pids };
   }
 
-  const result = await TubeExe.aggregate([
-    { $match: match },
-    {
-      $project: {
-        month: { $dateToString: { format: '%Y-%m', date: '$endTime', timezone: '+08:00' } },
-      },
-    },
-    { $match: { month: { $gte: startMonth, $lte: endMonth } } },
-    { $group: { _id: '$month', count: { $sum: 1 } } },   // 逐条计一例，不去重
-  ]);
+  // 拉取记录（需 startTime 用于接续判断）
+  const tubeRecords = await TubeExe.find(match)
+    .select('pid type startTime endTime')
+    .lean();
 
+  if (!tubeRecords.length) {
+    const monthMap = {};
+    months.forEach(m => { monthMap[m] = 0; });
+    return monthMap;
+  }
+
+  // 接续合并为留置段(episode)，每段 1 例
+  const episodes = buildGastricTubeEpisodes(tubeRecords);
+
+  // 按 finalEndTime +08:00 归月
   const countMap = {};
-  result.forEach(r => { countMap[r._id] = r.count; });
-  months.forEach(m => { if (!countMap[m]) countMap[m] = 0; });
+  months.forEach(m => { countMap[m] = 0; });
+  for (const episode of episodes) {
+    const month = moment(episode.finalEndTime).utcOffset(EAST_8_OFFSET_MINUTES).format('YYYY-MM');
+    if (countMap.hasOwnProperty(month)) {
+      countMap[month]++;
+    }
+  }
   return countMap;
 }
 
@@ -454,22 +536,28 @@ async function getDetail(indicatorKey, startMonth, endMonth, department = '') {
     }
 
     const tubeRecords = await TubeExe.find(match)
-      .select('pid type endTime')
+      .select('pid type startTime endTime')
       .lean();
 
     if (!tubeRecords.length) {
       return { indicator, columns: GASTRIC_TUBE_DETAIL_COLUMNS, rows: [] };
     }
 
-    const pids = [...new Set(tubeRecords.map(r => normalizeText(r.pid)))];
-    const patients = await Patient.find(buildPatientFilter({ _id: { $in: pids } }, department))
+    // 接续合并为留置段(episode)，每个 episode 1 行
+    const episodes = buildGastricTubeEpisodes(tubeRecords);
+    if (!episodes.length) {
+      return { indicator, columns: GASTRIC_TUBE_DETAIL_COLUMNS, rows: [] };
+    }
+
+    const epPids = [...new Set(episodes.map(ep => ep.pid))];
+    const patients = await Patient.find(buildPatientFilter({ _id: { $in: epPids } }, department))
       .select(PATIENT_SELECT)
       .lean();
     const patientMap = new Map(patients.map(p => [String(p._id), p]));
 
-    const rows = tubeRecords
-      .map((record) => {
-        const patient = patientMap.get(normalizeText(record.pid));
+    const rows = episodes
+      .map((episode) => {
+        const patient = patientMap.get(episode.pid);
         const base = patient ? toDetailRow(patient, 0) : null;
         return {
           index: 0,
@@ -487,8 +575,8 @@ async function getDetail(indicatorKey, startMonth, endMonth, department = '') {
           dischargeType: base?.dischargeType || '',
           transferDept: base?.transferDept || '',
           diagnosis: base?.diagnosis || '',
-          tubeType: record.type || '',
-          tubeEndTime: formatDateTime(record.endTime),
+          tubeType: episode.type || '',
+          tubeEndTime: formatDateTime(episode.finalEndTime),
           _sortTime: patient ? asDate(patient.icuAdmissionTime) : null,
         };
       })
