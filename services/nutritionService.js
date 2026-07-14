@@ -1,4 +1,5 @@
 const DrugExe = require('../models/DrugExe');
+const TubeExe = require('../models/TubeExe');
 const Patient = require('../models/Patient');
 const moment = require('moment');
 
@@ -9,10 +10,13 @@ const EAST_8_OFFSET_MINUTES = 8 * 60;
 const NUTRITION_INDICATORS = [
   { id: 1, name: '肠内营养统计', key: 'enteral', unit: '人' },
   { id: 2, name: '肠外营养统计', key: 'parenteral', unit: '人' },
+  { id: 3, name: '胃肠管留置例数', key: 'gastricTube', unit: '人' },
+  { id: 4, name: '肠内实施例数', key: 'enteralExec', unit: '人' },
 ];
 
 const ENTERAL_KEYWORDS = ['肠内营养粉剂', '肠内营养混悬液'];
 const PARENTERAL_KEYWORDS = ['脂肪乳氨基酸'];
+const GASTRIC_TUBE_TYPES = ['鼻肠管', '胃肠管'];
 
 const NUTRITION_DETAIL_COLUMNS = [
   { key: 'index', title: '序号' },
@@ -24,6 +28,26 @@ const NUTRITION_DETAIL_COLUMNS = [
   { key: 'icuAdmissionTime', title: '入科时间' },
   { key: 'icuDischargeTime', title: '出科时间' },
   { key: 'icuDays', title: '在科天数' },
+  { key: 'admissionDoctor', title: '收治医生' },
+  { key: 'attendingDoctor', title: '管床医生' },
+  { key: 'admissionSource', title: '入科来源' },
+  { key: 'dischargeType', title: '出科类型' },
+  { key: 'transferDept', title: '转出科室' },
+  { key: 'diagnosis', title: '临床诊断' },
+];
+
+const GASTRIC_TUBE_DETAIL_COLUMNS = [
+  { key: 'index', title: '序号' },
+  { key: 'department', title: '科室' },
+  { key: 'bedNo', title: '床号' },
+  { key: 'name', title: '姓名' },
+  { key: 'age', title: '年龄' },
+  { key: 'hospitalNo', title: '住院号' },
+  { key: 'icuAdmissionTime', title: '入科时间' },
+  { key: 'icuDischargeTime', title: '出科时间' },
+  { key: 'icuDays', title: '在科天数' },
+  { key: 'tubeType', title: '置管类型' },
+  { key: 'tubeEndTime', title: '置管结束时间' },
   { key: 'admissionDoctor', title: '收治医生' },
   { key: 'attendingDoctor', title: '管床医生' },
   { key: 'admissionSource', title: '入科来源' },
@@ -204,6 +228,7 @@ function getKeywordsByIndicator(indicatorKey) {
   switch (indicatorKey) {
     case 'enteral': return ENTERAL_KEYWORDS;
     case 'parenteral': return PARENTERAL_KEYWORDS;
+    case 'enteralExec': return ENTERAL_KEYWORDS; // 与 enteral 同关键词，区别在不去重
     default: throw new Error(`不支持的营养指标: ${indicatorKey}`);
   }
 }
@@ -268,13 +293,111 @@ async function getMonthlyCounts(startMonth, endMonth, indicatorKey, department) 
   return countMap;
 }
 
+// ── 胃肠管留置例数（TubeExe，endTime 归月，逐条计数）──
+
+async function getGastricTubeMonthlyCounts(startMonth, endMonth, department) {
+  const months = buildMonths(startMonth, endMonth);
+  const { startDate, endDate } = getFullRange(startMonth, endMonth);
+
+  const match = {
+    type: { $in: GASTRIC_TUBE_TYPES },
+    valid: { $ne: null },
+    endTime: { $gte: startDate, $lte: endDate },
+  };
+
+  // 科室过滤
+  if (department && process.env.ENABLE_DEPT_FILTER === 'true') {
+    const pids = await getDepartmentPatientIds(department);
+    if (!pids.length) {
+      const monthMap = {};
+      months.forEach(m => { monthMap[m] = 0; });
+      return monthMap;
+    }
+    match.pid = { $in: pids };
+  }
+
+  const result = await TubeExe.aggregate([
+    { $match: match },
+    {
+      $project: {
+        month: { $dateToString: { format: '%Y-%m', date: '$endTime', timezone: '+08:00' } },
+      },
+    },
+    { $match: { month: { $gte: startMonth, $lte: endMonth } } },
+    { $group: { _id: '$month', count: { $sum: 1 } } },   // 逐条计一例，不去重
+  ]);
+
+  const countMap = {};
+  result.forEach(r => { countMap[r._id] = r.count; });
+  months.forEach(m => { if (!countMap[m]) countMap[m] = 0; });
+  return countMap;
+}
+
+// ── 肠内实施例数（DrugExe 同关键词，startTime 归月，逐条计数）─
+
+async function getEnteralExecMonthlyCounts(startMonth, endMonth, department) {
+  const months = buildMonths(startMonth, endMonth);
+  const { startDate, endDate } = getFullRange(startMonth, endMonth);
+  const keywordOr = buildKeywordRegexOr(ENTERAL_KEYWORDS);
+
+  const match = {
+    status: { $ne: 'invalid' },
+    startTime: { $gte: startDate, $lte: endDate },
+    $or: keywordOr,
+  };
+
+  // 科室过滤
+  if (department && process.env.ENABLE_DEPT_FILTER === 'true') {
+    const pids = await getDepartmentPatientIds(department);
+    if (!pids.length) {
+      const monthMap = {};
+      months.forEach(m => { monthMap[m] = 0; });
+      return monthMap;
+    }
+    match.pid = { $in: pids };
+  }
+
+  const result = await DrugExe.aggregate([
+    { $match: match },
+    {
+      $project: {
+        month: { $dateToString: { format: '%Y-%m', date: '$startTime', timezone: '+08:00' } },
+      },
+    },
+    { $match: { month: { $gte: startMonth, $lte: endMonth } } },
+    { $group: { _id: '$month', count: { $sum: 1 } } },   // 逐条计一例，不去重
+  ]);
+
+  const countMap = {};
+  result.forEach(r => { countMap[r._id] = r.count; });
+  months.forEach(m => { if (!countMap[m]) countMap[m] = 0; });
+  return countMap;
+}
+
 // ── 年度 / 范围统计 ───────────────────────────────────
+
+// ── 按 key 分派计数函数 ────────────────────────────────
+
+function getCountFnByKey(indicatorKey) {
+  switch (indicatorKey) {
+    case 'enteral':
+    case 'parenteral':
+      return getMonthlyCounts;      // 按月 + pid 去重
+    case 'gastricTube':
+      return getGastricTubeMonthlyCounts;  // TubeExe 逐条
+    case 'enteralExec':
+      return getEnteralExecMonthlyCounts;  // DrugExe 逐条
+    default:
+      throw new Error(`不支持的指标: ${indicatorKey}`);
+  }
+}
 
 async function getYearStats(year, department = '') {
   const y = validateYear(year);
   const months = Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`);
   const data = await Promise.all(NUTRITION_INDICATORS.map(async (indicator) => {
-    const monthMap = await getMonthlyCounts(`${y}-01`, `${y}-12`, indicator.key, department);
+    const countFn = getCountFnByKey(indicator.key);
+    const monthMap = await countFn(`${y}-01`, `${y}-12`, department);
     const total = Object.values(monthMap).reduce((sum, v) => sum + v, 0);
     return {
       id: indicator.id,
@@ -291,7 +414,8 @@ async function getYearStats(year, department = '') {
 async function getRangeStats(startMonth, endMonth, department = '') {
   const months = buildMonths(startMonth, endMonth);
   const data = await Promise.all(NUTRITION_INDICATORS.map(async (indicator) => {
-    const monthMap = await getMonthlyCounts(startMonth, endMonth, indicator.key, department);
+    const countFn = getCountFnByKey(indicator.key);
+    const monthMap = await countFn(startMonth, endMonth, department);
     const total = Object.values(monthMap).reduce((sum, v) => sum + v, 0);
     return {
       id: indicator.id,
@@ -312,9 +436,150 @@ async function getDetail(indicatorKey, startMonth, endMonth, department = '') {
 
   const months = buildMonths(startMonth, endMonth);
   const { startDate, endDate } = getFullRange(startMonth, endMonth);
+  const indicator = NUTRITION_INDICATORS.find(item => item.key === indicatorKey);
+
+  // ── 胃肠管留置例数：TubeExe 逐条列出 ──
+  if (indicatorKey === 'gastricTube') {
+    const match = {
+      type: { $in: GASTRIC_TUBE_TYPES },
+      valid: { $ne: null },
+      endTime: { $gte: startDate, $lte: endDate },
+    };
+
+    if (department && process.env.ENABLE_DEPT_FILTER === 'true') {
+      const pids = await getDepartmentPatientIds(department);
+      if (!pids.length) {
+        return { indicator, columns: GASTRIC_TUBE_DETAIL_COLUMNS, rows: [] };
+      }
+      match.pid = { $in: pids };
+    }
+
+    const tubeRecords = await TubeExe.find(match)
+      .select('pid type endTime')
+      .lean();
+
+    if (!tubeRecords.length) {
+      return { indicator, columns: GASTRIC_TUBE_DETAIL_COLUMNS, rows: [] };
+    }
+
+    const pids = [...new Set(tubeRecords.map(r => normalizeText(r.pid)))];
+    const patients = await Patient.find(buildPatientFilter({ _id: { $in: pids } }, department))
+      .select(PATIENT_SELECT)
+      .lean();
+    const patientMap = new Map(patients.map(p => [String(p._id), p]));
+
+    const rows = tubeRecords
+      .map((record) => {
+        const patient = patientMap.get(normalizeText(record.pid));
+        const base = patient ? toDetailRow(patient, 0) : null;
+        return {
+          index: 0,
+          department: base?.department || '',
+          bedNo: base?.bedNo || '',
+          name: base?.name || '',
+          age: base?.age || '',
+          hospitalNo: base?.hospitalNo || '',
+          icuAdmissionTime: base?.icuAdmissionTime || '',
+          icuDischargeTime: base?.icuDischargeTime || '',
+          icuDays: base?.icuDays || '',
+          admissionDoctor: base?.admissionDoctor || '',
+          attendingDoctor: base?.attendingDoctor || '',
+          admissionSource: base?.admissionSource || '',
+          dischargeType: base?.dischargeType || '',
+          transferDept: base?.transferDept || '',
+          diagnosis: base?.diagnosis || '',
+          tubeType: record.type || '',
+          tubeEndTime: formatDateTime(record.endTime),
+          _sortTime: patient ? asDate(patient.icuAdmissionTime) : null,
+        };
+      })
+      .sort((a, b) => {
+        if (!a._sortTime && !b._sortTime) return 0;
+        if (!a._sortTime) return 1;
+        if (!b._sortTime) return -1;
+        return a._sortTime - b._sortTime;
+      })
+      .map((row, idx) => ({ ...row, index: idx + 1 }));
+
+    return { indicator, columns: GASTRIC_TUBE_DETAIL_COLUMNS, rows };
+  }
+
+  // ── 肠内实施例数：DrugExe 逐条列出 ──
+  if (indicatorKey === 'enteralExec') {
+    const keywordOr = buildKeywordRegexOr(ENTERAL_KEYWORDS);
+
+    const match = {
+      status: { $ne: 'invalid' },
+      startTime: { $gte: startDate, $lte: endDate },
+      $or: keywordOr,
+    };
+
+    if (department && process.env.ENABLE_DEPT_FILTER === 'true') {
+      const pids = await getDepartmentPatientIds(department);
+      if (!pids.length) {
+        return { indicator, columns: NUTRITION_DETAIL_COLUMNS, rows: [] };
+      }
+      match.pid = { $in: pids };
+    }
+
+    const drugRecords = await DrugExe.find(match)
+      .select('pid startTime')
+      .lean();
+
+    // 归月过滤（startTime 在东八区）
+    const filtered = drugRecords.filter(r => {
+      const m = moment(r.startTime).utcOffset(EAST_8_OFFSET_MINUTES).format('YYYY-MM');
+      return m >= months[0] && m <= months[months.length - 1];
+    });
+
+    if (!filtered.length) {
+      return { indicator, columns: NUTRITION_DETAIL_COLUMNS, rows: [] };
+    }
+
+    const pids = [...new Set(filtered.map(r => normalizeText(r.pid)))];
+    const patients = await Patient.find(buildPatientFilter({ _id: { $in: pids } }, department))
+      .select(PATIENT_SELECT)
+      .lean();
+    const patientMap = new Map(patients.map(p => [String(p._id), p]));
+
+    const rows = filtered
+      .map((record) => {
+        const patient = patientMap.get(normalizeText(record.pid));
+        const base = patient ? toDetailRow(patient, 0) : null;
+        return {
+          index: 0,
+          department: base?.department || '',
+          bedNo: base?.bedNo || '',
+          name: base?.name || '',
+          age: base?.age || '',
+          hospitalNo: base?.hospitalNo || '',
+          icuAdmissionTime: base?.icuAdmissionTime || '',
+          icuDischargeTime: base?.icuDischargeTime || '',
+          icuDays: base?.icuDays || '',
+          admissionDoctor: base?.admissionDoctor || '',
+          attendingDoctor: base?.attendingDoctor || '',
+          admissionSource: base?.admissionSource || '',
+          dischargeType: base?.dischargeType || '',
+          transferDept: base?.transferDept || '',
+          diagnosis: base?.diagnosis || '',
+          _sortTime: patient ? asDate(patient.icuAdmissionTime) : null,
+        };
+      })
+      .sort((a, b) => {
+        if (!a._sortTime && !b._sortTime) return 0;
+        if (!a._sortTime) return 1;
+        if (!b._sortTime) return -1;
+        return a._sortTime - b._sortTime;
+      })
+      .map((row, idx) => ({ ...row, index: idx + 1 }));
+
+    return { indicator, columns: NUTRITION_DETAIL_COLUMNS, rows };
+  }
+
+  // ── enteral / parenteral：原有逻辑（DrugExe + pid 去重）─
+
   const keywords = getKeywordsByIndicator(indicatorKey);
   const keywordOr = buildKeywordRegexOr(keywords);
-  const indicator = NUTRITION_INDICATORS.find(item => item.key === indicatorKey);
 
   const match = {
     status: { $ne: 'invalid' },
@@ -356,8 +621,6 @@ async function getDetail(indicatorKey, startMonth, endMonth, department = '') {
   const patients = await Patient.find(buildPatientFilter({ _id: { $in: uniquePids } }, department))
     .select(PATIENT_SELECT)
     .lean();
-
-  const patientMap = new Map(patients.map(p => [String(p._id), p]));
 
   // 按入科时间升序排列
   const sortedPatients = patients
@@ -610,10 +873,13 @@ module.exports = {
   NUTRITION_INDICATORS,
   ENTERAL_KEYWORDS,
   PARENTERAL_KEYWORDS,
+  GASTRIC_TUBE_TYPES,
   getYearStats,
   getRangeStats,
   getDetail,
   getDailyEnteral,
   getDailyEnteralDetail,
   getDailyEnteralRangeDetail,
+  getGastricTubeMonthlyCounts,
+  getEnteralExecMonthlyCounts,
 };
