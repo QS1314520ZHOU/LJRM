@@ -22,6 +22,8 @@ const ENTERAL_KEYWORDS = ['肠内营养粉剂', '肠内营养混悬液'];
 const ENTERAL_POWDER_KEYWORDS = ['肠内营养粉剂'];
 const PARENTERAL_KEYWORDS = ['脂肪乳氨基酸'];
 const LAB_ITEM_CODES = { albumin: '5353', prealbumin: '5356', crp: '5458', il6: '5977' };
+const LAB_LABELS = { albumin: '白蛋白', prealbumin: '前白蛋白', crp: 'C反应蛋白', il6: '白介素6' };
+const LAB_ORDER = ['albumin', 'prealbumin', 'crp', 'il6'];
 const GASTRIC_TUBE_TYPES = ['鼻肠管', '胃肠管', '胃管'];
 
 const NUTRITION_DETAIL_COLUMNS = [
@@ -110,6 +112,19 @@ const ENTERAL_POWDER_DETAIL_COLUMNS = [
   { key: 'dischargeType', title: '出科类型' },
   { key: 'transferDept', title: '转出科室' },
   { key: 'diagnosis', title: '临床诊断' },
+];
+
+// enteral 专用基础列（不含医生/入科来源/出科类型/转出科室/临床诊断）
+const ENTERAL_BASE_DETAIL_COLUMNS = [
+  { key: 'index', title: '序号' },
+  { key: 'department', title: '科室' },
+  { key: 'bedNo', title: '床号' },
+  { key: 'name', title: '姓名' },
+  { key: 'age', title: '年龄' },
+  { key: 'hospitalNo', title: '住院号' },
+  { key: 'icuAdmissionTime', title: '入科时间' },
+  { key: 'icuDischargeTime', title: '出科时间' },
+  { key: 'icuDays', title: '在科天数' },
 ];
 
 const SUPPORTED_NUTRITION_KEYS = new Set(NUTRITION_INDICATORS.map(item => item.key));
@@ -320,6 +335,72 @@ function pickLabValuesSameDay(labList, medicationTime) {
     if (cands.length) out[key] = cands[0].result ?? '';
   }
   return out;
+}
+
+// ── enteral 专用：按在科窗口取化验序列（成对列，动态扩展）─
+
+async function buildLabSeriesMap(windowByMrn) {
+  const mrns = [...windowByMrn.keys()];
+  const empty = new Map();
+  if (!mrns.length) return empty;
+
+  const exams = await ViIcuExam.find({
+    mrn: { $in: mrns }, valid: { $ne: false },
+  }).select('reportID mrn authTime').lean();
+  if (!exams.length) return empty;
+
+  const examMap = new Map(exams.map(e => [String(e.reportID), e]));
+  const items = await ViIcuExamItem.find({
+    examID: { $in: exams.map(e => String(e.reportID)) },
+    itemCode: { $in: Object.values(LAB_ITEM_CODES) },
+  }).select('examID itemCode result').lean();
+
+  const codeToKey = Object.fromEntries(Object.entries(LAB_ITEM_CODES).map(([k, c]) => [c, k]));
+  const byMrn = new Map();
+  for (const it of items) {
+    const exam = examMap.get(String(it.examID));
+    if (!exam) continue;
+    const key = codeToKey[String(it.itemCode)];
+    if (!key) continue;
+    const mrn = String(exam.mrn);
+    const win = windowByMrn.get(mrn);
+    if (!win) continue;
+    const t = asDate(exam.authTime);
+    if (!t) continue;
+    if (win.start && t < win.start) continue;   // 早于入科丢弃
+    if (win.end && t > win.end) continue;        // 晚于出科丢弃
+    if (!byMrn.has(mrn)) byMrn.set(mrn, { albumin: [], prealbumin: [], crp: [], il6: [] });
+    byMrn.get(mrn)[key].push({ authTime: t, result: it.result });
+  }
+  for (const series of byMrn.values()) {
+    for (const k of LAB_ORDER) series[k].sort((a, b) => (a.authTime?.getTime() || 0) - (b.authTime?.getTime() || 0));
+  }
+  return byMrn;
+}
+
+function buildLabColumns(maxCounts) {
+  const cols = [];
+  for (const key of LAB_ORDER) {
+    const n = maxCounts[key] || 0;
+    for (let i = 1; i <= n; i++) {
+      const suffix = n > 1 ? `(${i})` : '';
+      cols.push({ key: `${key}_time_${i}`, title: `${LAB_LABELS[key]}结果时间${suffix}` });
+      cols.push({ key: `${key}_${i}`,      title: `${LAB_LABELS[key]}${suffix}` });
+    }
+  }
+  return cols;
+}
+
+function fillLabCells(series) {
+  const cell = {};
+  for (const key of LAB_ORDER) {
+    (series?.[key] || []).forEach((rec, idx) => {
+      const i = idx + 1;
+      cell[`${key}_time_${i}`] = rec.authTime ? formatDateTime(rec.authTime) : '';
+      cell[`${key}_${i}`] = rec.result ?? '';
+    });
+  }
+  return cell;
 }
 
 // ── 科室过滤辅助 ──────────────────────────────────────
@@ -767,6 +848,93 @@ async function getDetail(indicatorKey, startMonth, endMonth, department = '') {
       .map((row, idx) => ({ ...row, index: idx + 1 }));
 
     return { indicator, columns: GASTRIC_TUBE_DETAIL_COLUMNS, rows };
+  }
+
+  // ── 肠内营养统计：pid+月去重 + 在科窗口化验序列（动态成对列）──
+  if (indicatorKey === 'enteral') {
+    const keywords = getKeywordsByIndicator(indicatorKey);
+    const keywordOr = buildKeywordRegexOr(keywords);
+
+    const match = {
+      status: { $ne: 'invalid' },
+      startTime: { $gte: startDate, $lte: endDate },
+      $or: keywordOr,
+    };
+
+    if (department && process.env.ENABLE_DEPT_FILTER === 'true') {
+      const pids = await getDepartmentPatientIds(department);
+      if (!pids.length) {
+        return { indicator, columns: ENTERAL_BASE_DETAIL_COLUMNS, rows: [] };
+      }
+      match.pid = { $in: pids };
+    }
+
+    // 查询 drugExe 记录，按 {pid, month} 去重
+    const rawRecords = await DrugExe.find(match)
+      .select('pid startTime')
+      .lean();
+
+    const seen = new Set();
+    const dedupedPids = [];
+    for (const record of rawRecords) {
+      const pid = normalizeText(record.pid);
+      const month = moment(record.startTime).utcOffset(EAST_8_OFFSET_MINUTES).format('YYYY-MM');
+      if (month < months[0] || month > months[months.length - 1]) continue;
+      const key = `${pid}::${month}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      dedupedPids.push(pid);
+    }
+
+    const uniquePids = [...new Set(dedupedPids)];
+    if (!uniquePids.length) {
+      return { indicator, columns: ENTERAL_BASE_DETAIL_COLUMNS, rows: [] };
+    }
+
+    const patients = await Patient.find(buildPatientFilter({ _id: { $in: uniquePids } }, department))
+      .select(PATIENT_SELECT)
+      .lean();
+
+    const sortedPatients = patients
+      .map(p => ({ patient: p, sortTime: asDate(p.icuAdmissionTime) }))
+      .sort((a, b) => {
+        if (!a.sortTime && !b.sortTime) return 0;
+        if (!a.sortTime) return 1;
+        if (!b.sortTime) return -1;
+        return a.sortTime - b.sortTime;
+      });
+
+    // 构造在科窗口，按患者过滤化验序列
+    const windowByMrn = new Map();
+    for (const { patient } of sortedPatients) {
+      const mrn = String(firstValue(patient, ['mrn']) || '');
+      if (!mrn) continue;
+      windowByMrn.set(mrn, {
+        start: asDate(patient.icuAdmissionTime),
+        end: asDate(patient.icuDischargeTime) || new Date(),
+      });
+    }
+    const labMap = await buildLabSeriesMap(windowByMrn);
+
+    // 计算每个项目的最大出现次数（决定列数）
+    const maxCounts = {};
+    for (const key of LAB_ORDER) maxCounts[key] = 0;
+    for (const series of labMap.values()) {
+      for (const key of LAB_ORDER) {
+        maxCounts[key] = Math.max(maxCounts[key], (series[key] || []).length);
+      }
+    }
+
+    const columns = [...ENTERAL_BASE_DETAIL_COLUMNS, ...buildLabColumns(maxCounts)];
+
+    const rows = sortedPatients.map(({ patient }, idx) => {
+      const base = toDetailRow(patient, idx + 1);
+      const mrn = String(firstValue(patient, ['mrn']) || '');
+      const cells = fillLabCells(labMap.get(mrn));
+      return { ...base, ...cells };
+    });
+
+    return { indicator, columns, rows };
   }
 
   // ── 肠内实施例数：DrugExe 逐条列出 ──
