@@ -2,6 +2,8 @@ const DrugExe = require('../models/DrugExe');
 const TubeExe = require('../models/TubeExe');
 const Patient = require('../models/Patient');
 const ConfigDrugMethod = require('../models/ConfigDrugMethod');
+const ViIcuExam = require('../models/ViIcuExam');
+const ViIcuExamItem = require('../models/ViIcuExamItem');
 const moment = require('moment');
 
 // ── 常量 ──────────────────────────────────────────────
@@ -19,6 +21,7 @@ const NUTRITION_INDICATORS = [
 const ENTERAL_KEYWORDS = ['肠内营养粉剂', '肠内营养混悬液'];
 const ENTERAL_POWDER_KEYWORDS = ['肠内营养粉剂'];
 const PARENTERAL_KEYWORDS = ['脂肪乳氨基酸'];
+const LAB_ITEM_CODES = { albumin: '5353', prealbumin: '5356', crp: '5458', il6: '5977' };
 const GASTRIC_TUBE_TYPES = ['鼻肠管', '胃肠管', '胃管'];
 
 const NUTRITION_DETAIL_COLUMNS = [
@@ -276,11 +279,47 @@ async function getDrugMethodMap() {
   return new Map(list.map(m => [String(m.code), m.name]));
 }
 
-// ── 化验值占位（待后续接入真实数据源）─────────────────
+// ── 化验值批量取数（DataCenter 库，mrn→VI_ICU_EXAM→VI_ICU_EXAM_ITEM）─
 
-function getLabValues(pid, ctx) {
-  void pid; void ctx;
-  return { albumin: '', prealbumin: '', crp: '', il6: '' };
+async function buildLabValueMap(mrns) {
+  const cleanMrns = [...new Set(mrns.filter(Boolean).map(String))];
+  const map = new Map();
+  if (!cleanMrns.length) return map;
+
+  const exams = await ViIcuExam.find({ mrn: { $in: cleanMrns }, valid: { $ne: false } })
+    .select('reportID mrn authTime').lean();
+  if (!exams.length) return map;
+
+  const examMap = new Map(exams.map(e => [String(e.reportID), e]));
+  const items = await ViIcuExamItem.find({
+    examID: { $in: exams.map(e => String(e.reportID)) },
+    itemCode: { $in: Object.values(LAB_ITEM_CODES) },
+  }).select('examID itemCode result').lean();
+
+  for (const it of items) {
+    const exam = examMap.get(String(it.examID));
+    if (!exam) continue;
+    const mrn = String(exam.mrn);
+    if (!map.has(mrn)) map.set(mrn, []);
+    map.get(mrn).push({ itemCode: String(it.itemCode), result: it.result, authTime: asDate(exam.authTime) });
+  }
+  return map;
+}
+
+// ── 当天化验取值（用药时间所在东八区自然日，同名多条取 authTime 最新）─
+
+function pickLabValuesSameDay(labList, medicationTime) {
+  const out = { albumin: '', prealbumin: '', crp: '', il6: '' };
+  if (!labList || !labList.length || !medicationTime) return out;
+  const day = moment(medicationTime).utcOffset(EAST_8_OFFSET_MINUTES).format('YYYY-MM-DD');
+  for (const [key, code] of Object.entries(LAB_ITEM_CODES)) {
+    const cands = labList
+      .filter(x => x.itemCode === code && x.authTime &&
+        moment(x.authTime).utcOffset(EAST_8_OFFSET_MINUTES).format('YYYY-MM-DD') === day)
+      .sort((a, b) => b.authTime - a.authTime);
+    if (cands.length) out[key] = cands[0].result ?? '';
+  }
+  return out;
 }
 
 // ── 科室过滤辅助 ──────────────────────────────────────
@@ -851,6 +890,10 @@ async function getDetail(indicatorKey, startMonth, endMonth, department = '') {
       .lean();
     const patientMap = new Map(patients.map(p => [String(p._id), p]));
 
+    // 批量加载化验值（按 mrn → exam → item 链路）
+    const mrns = patients.map(p => firstValue(p, ['mrn'])).filter(Boolean);
+    const labMap = await buildLabValueMap(mrns);
+
     const rows = filtered
       .map((record) => {
         const patient = patientMap.get(normalizeText(record.pid));
@@ -859,7 +902,8 @@ async function getDetail(indicatorKey, startMonth, endMonth, department = '') {
           .map(d => d.name || '')
           .filter(Boolean)
           .join('、');
-        const labVals = getLabValues(normalizeText(record.pid), {});
+        const mrn = patient ? firstValue(patient, ['mrn']) : '';
+        const labVals = pickLabValuesSameDay(labMap.get(String(mrn)), record.startTime);
         return {
           index: 0,
           department: base?.department || '',
