@@ -904,15 +904,18 @@ async function getDetail(indicatorKey, startMonth, endMonth, department = '') {
         return a.sortTime - b.sortTime;
       });
 
-    // 构造在科窗口，按患者过滤化验序列
+    // 构造窗口=在科 ∩ 查询范围，按患者过滤化验序列
     const windowByMrn = new Map();
     for (const { patient } of sortedPatients) {
       const mrn = String(firstValue(patient, ['mrn']) || '');
       if (!mrn) continue;
-      windowByMrn.set(mrn, {
-        start: asDate(patient.icuAdmissionTime),
-        end: asDate(patient.icuDischargeTime) || new Date(),
-      });
+      const admit = asDate(patient.icuAdmissionTime);
+      const discharge = asDate(patient.icuDischargeTime) || new Date();
+      // 与查询时间范围取交集：月度详情 startMonth==endMonth => 当月；总计逐月调用 => 查询范围
+      const winStart = new Date(Math.max(admit ? admit.getTime() : startDate.getTime(), startDate.getTime()));
+      const winEnd = new Date(Math.min(discharge.getTime(), endDate.getTime()));
+      if (winEnd < winStart) continue; // 无交集则该患者本次不取检验
+      windowByMrn.set(mrn, { start: winStart, end: winEnd });
     }
     const labMap = await buildLabSeriesMap(windowByMrn);
 
