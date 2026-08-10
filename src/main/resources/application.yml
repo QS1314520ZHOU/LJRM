@@ -1,0 +1,29 @@
+server:
+  port: ${SERVER_PORT:3000}
+
+spring:
+  application:
+    name: icu-stats
+  data:
+    mongodb:
+      # Default connection (will be overridden by custom configs)
+      host: 127.0.0.1
+      port: 27017
+
+# Custom MongoDB configuration
+mongodb:
+  datacenter:
+    uri: ${MONGO_DATACENTER_URI:mongodb://127.0.0.1:27017/DataCenter}
+  smartcare:
+    uri: ${MONGO_SMARTCARE_URI:mongodb://127.0.0.1:27017/SmartCare}
+  timeout-ms: ${MONGO_TIMEOUT_MS:10000}
+
+# ICU Stats configuration
+icu-stats:
+  enable-dept-filter: ${ENABLE_DEPT_FILTER:false}
+  timezone: ${TZ:Asia/Shanghai}
+
+logging:
+  level:
+    root: INFO
+    com.smartcare.icustats: INFO
