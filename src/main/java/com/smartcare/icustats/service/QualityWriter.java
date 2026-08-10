@@ -20,6 +20,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Quality Writer - faithful Java migration of Node.js qualityWriter.js
@@ -124,13 +125,26 @@ public class QualityWriter {
 
         ObjectId qualityId = q.getObjectId("_id");
 
-        // 2. Delete existing items
+        // 2. Delete existing detail records BEFORE deleting items (MongoDB has no cascade delete)
+        List<Document> existingItems = mongoTemplate.find(
+                new Query(Criteria.where("qualityId").is(qualityId)),
+                Document.class, "doctorQualityItem");
+        if (!existingItems.isEmpty()) {
+            List<ObjectId> itemIds = existingItems.stream()
+                    .map(doc -> doc.getObjectId("_id"))
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!itemIds.isEmpty()) {
+                mongoTemplate.remove(
+                        new Query(Criteria.where("itemId").in(itemIds)),
+                        "doctorQualityItemDetail");
+            }
+        }
+
+        // 3. Delete existing items
         mongoTemplate.remove(
                 new Query(Criteria.where("qualityId").is(qualityId)),
                 "doctorQualityItem");
-
-        // 3. Delete existing detail records for those items (by itemId collection)
-        // (detail records are removed when their parent item is removed above)
 
         // 4. Insert items + detail
         for (int i = 0; i < items.size(); i++) {
