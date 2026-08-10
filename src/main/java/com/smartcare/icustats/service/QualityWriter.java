@@ -191,7 +191,7 @@ public class QualityWriter {
         // ===== 7/8/9 APACHEII 系列（由 qualityCalcService 单独计算，此处略）=====
 
         // ===== 10. 感染性休克集束化治疗完成率 =====
-        Map<String, Object> sb = qualityCalcService.calcShockBundle(monthKey);
+        Map<String, Object> sb = qualityCalcService.calcShockBundle(monthKey, department);
         long sbNum = toLong(sb.get("num"));
         long sbDenom = toLong(sb.get("denom"));
         @SuppressWarnings("unchecked")

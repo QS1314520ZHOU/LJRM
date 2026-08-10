@@ -1,5 +1,6 @@
 package com.smartcare.icustats.util;
 
+import com.smartcare.icustats.dto.MonthRange;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Date;
@@ -106,7 +107,7 @@ public class NumberUtils {
         if (birthday == null) return "";
         java.time.ZonedDateTime now = java.time.ZonedDateTime.now(DateRangeUtils.SHANGHAI_ZONE);
         java.time.ZonedDateTime bday = birthday.toInstant().atZone(DateRangeUtils.SHANGHAI_ZONE);
-        int age = java.time.temporal.ChronoUnit.YEARS.between(bday, now);
+        int age = (int) java.time.temporal.ChronoUnit.YEARS.between(bday, now);
         return age + "岁";
     }
 
@@ -180,8 +181,8 @@ public class NumberUtils {
 
         if (effectiveEnd.isBefore(effectiveStart)) return 0;
         return (int) (java.time.temporal.ChronoUnit.DAYS.between(
-                effectiveStart.toLocalDate().atStartOfDay(SHANGHAI_ZONE).toInstant(),
-                effectiveEnd.toLocalDate().atStartOfDay(SHANGHAI_ZONE).toInstant()
+                effectiveStart.toLocalDate().atStartOfDay(DateRangeUtils.SHANGHAI_ZONE).toInstant(),
+                effectiveEnd.toLocalDate().atStartOfDay(DateRangeUtils.SHANGHAI_ZONE).toInstant()
         ) / 86400 + 1);
     }
 

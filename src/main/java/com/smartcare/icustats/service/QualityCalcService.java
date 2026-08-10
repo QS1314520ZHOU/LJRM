@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.BasicQuery;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
@@ -82,7 +83,7 @@ public class QualityCalcService {
             filter.append("$or", deptOr);
         }
 
-        return smartCareMongo.find(new Query(new Document(filter)), Document.class, "patient");
+        return smartCareMongo.find(new BasicQuery(filter), Document.class, "patient");
     }
 
     /**
@@ -652,7 +653,7 @@ public class QualityCalcService {
     public Map<String, Object> calcRescue(String monthKey) {
         Document orderFilter = orderQuery(monthKey, Collections.singletonList("抢救"));
         List<Document> rescueOrders = dataCenterMongo.find(
-                new Query(new Document(orderFilter)),
+                new BasicQuery(orderFilter),
                 Document.class, "VI_ICU_ZYYZ"
         );
 
@@ -706,7 +707,7 @@ public class QualityCalcService {
      * Read quality indicator data from VI_ICU_QUALITY.
      * Original JS: readQualityData(monthKey, indicatorCode, deptCode)
      */
-    public Object readQualityData(String monthKey, String indicatorCode, String deptCode) {
+    public double readQualityData(String monthKey, String indicatorCode, String deptCode) {
         if (deptCode == null) deptCode = "all";
         String[] parts = monthKey.split("-");
         int year = Integer.parseInt(parts[0]);
@@ -722,7 +723,7 @@ public class QualityCalcService {
 
         if (doc == null) return 0;
         Object indicatorData = doc.get("indicatorData");
-        return indicatorData != null ? indicatorData : 0;
+        return NumberUtils.safeNumber(indicatorData);
     }
 
     /**
@@ -812,7 +813,7 @@ public class QualityCalcService {
         }
 
         // Combine filter with mrn constraint
-        Query query = new Query(new Document(filter));
+        Query query = new BasicQuery(filter);
         query.addCriteria(Criteria.where("mrn").in(mrns));
         query.fields().include("mrn").include("orderTime");
         List<Document> orders = dataCenterMongo.find(query, Document.class, "VI_ICU_ZYYZ");

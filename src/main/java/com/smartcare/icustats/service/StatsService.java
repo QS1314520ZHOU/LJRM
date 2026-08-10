@@ -711,6 +711,14 @@ public class StatsService {
     }
 
     /**
+     * 返回指标列表
+     * Original Node.js: ok(res, statsService.INDICATORS)
+     */
+    public List<Map<String, Object>> getIndicators() {
+        return INDICATORS;
+    }
+
+    /**
      * Original Node.js: getYearStats(year, department)
      */
     public Map<String, Object> getYearStats(String year, String department) {
