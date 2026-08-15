@@ -1,5 +1,6 @@
 package com.smartcare.icustats.service;
 
+import com.smartcare.icustats.config.CollectionConstants;
 import com.smartcare.icustats.dto.MonthRange;
 import com.smartcare.icustats.util.DateRangeUtils;
 import com.smartcare.icustats.util.NumberUtils;
@@ -408,7 +409,7 @@ public class QualityService {
             filter.append("deptCode", deptCode);
         }
 
-        List<Document> allDocs = smartCareMongo.find(new BasicQuery(filter), Document.class, "doctorQuality");
+        List<Document> allDocs = smartCareMongo.find(new BasicQuery(filter), Document.class, CollectionConstants.DOCTOR_QUALITY);
         // Filter by month
         return allDocs.stream().filter(doc -> {
             Integer month = parseMonthFromFlag(doc.get("flag"));
@@ -435,7 +436,7 @@ public class QualityService {
             filter.append("deptCode", deptCode);
         }
 
-        List<Document> allDocs = smartCareMongo.find(new BasicQuery(filter), Document.class, "doctorQC");
+        List<Document> allDocs = smartCareMongo.find(new BasicQuery(filter), Document.class, CollectionConstants.DOCTOR_QC);
         return allDocs.stream().filter(doc -> {
             Integer month = parseMonthFromFlag(doc.get("flag"));
             return month != null && monthNums.contains(month);
@@ -445,7 +446,7 @@ public class QualityService {
     private List<Document> fetchItemsByQualityIds(List<String> qualityIds) {
         if (qualityIds.isEmpty()) return Collections.emptyList();
         return smartCareMongo.find(
-                new Query(Criteria.where("qualityId").in(qualityIds)), Document.class, "doctorQualityItem");
+                new Query(Criteria.where("qualityId").in(qualityIds)), Document.class, CollectionConstants.DOCTOR_QUALITY_ITEM);
     }
 
     private List<Document> fetchQcItemsByQualityIds(List<String> qualityIds) {
@@ -457,7 +458,7 @@ public class QualityService {
     private List<Document> fetchDetailRowsByItemIds(List<String> itemIds) {
         if (itemIds.isEmpty()) return Collections.emptyList();
         return smartCareMongo.find(
-                new Query(Criteria.where("itemId").in(itemIds)), Document.class, "doctorQualityItemDetail");
+                new Query(Criteria.where("itemId").in(itemIds)), Document.class, CollectionConstants.DOCTOR_QUALITY_ITEM_DETAIL);
     }
 
     private List<Document> fetchQcDetailRowsByItemIds(List<String> itemIds) {
@@ -479,9 +480,42 @@ public class QualityService {
         return docs.stream().filter(d -> code.equals(d.get("indicatorCode"))).collect(Collectors.toList());
     }
 
+    private static final Map<String, String> DEFAULT_DEPT_CODE_MAP;
+    static {
+        Map<String, String> m = new LinkedHashMap<>();
+        m.put("重症医学科", "0211");
+        m.put("ICU", "0211");
+        DEFAULT_DEPT_CODE_MAP = Collections.unmodifiableMap(m);
+    }
+
+    private volatile Map<String, String> deptCodeMapCache;
+
+    private Map<String, String> getDepartmentCodeMap() {
+        if (deptCodeMapCache != null) return deptCodeMapCache;
+        Map<String, String> result = new LinkedHashMap<>(DEFAULT_DEPT_CODE_MAP);
+        String json = System.getenv("QUALITY_DEPT_CODE_MAP");
+        if (json != null && !json.isEmpty()) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, String> parsed = new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readValue(json, Map.class);
+                result.putAll(parsed);
+            } catch (Exception e) {
+                log.warn("QUALITY_DEPT_CODE_MAP JSON 解析失败，使用默认映射: {}", e.getMessage());
+            }
+        }
+        deptCodeMapCache = Collections.unmodifiableMap(result);
+        return deptCodeMapCache;
+    }
+
     private String resolveDepartmentCode(String department) {
-        if (department != null && !department.isEmpty()) return "0211";
-        return "0211";
+        Map<String, String> codeMap = getDepartmentCodeMap();
+        if (department != null && !department.isEmpty() && codeMap.containsKey(department)) {
+            return codeMap.get(department);
+        }
+        String envDefault = System.getenv("QUALITY_DEFAULT_DEPT_CODE");
+        if (envDefault != null && !envDefault.isEmpty()) return envDefault;
+        return codeMap.getOrDefault("重症医学科", "");
     }
 
     private Integer parseMonthFromFlag(Object flag) {
@@ -570,7 +604,12 @@ public class QualityService {
                 }
                 Object apacheII = score.get("apacheII");
                 if (apacheII instanceof Map) {
-                    predictedMortalitySum += NumberUtils.safeNumber(((Map<?, ?>) apacheII).get("calDead"));
+                    Object calDead = ((Map<?, ?>) apacheII).get("calDead");
+                    if (calDead instanceof Map) {
+                        predictedMortalitySum += NumberUtils.safeNumber(((Map<?, ?>) calDead).get("score"));
+                    } else if (calDead != null) {
+                        predictedMortalitySum += NumberUtils.safeNumber(calDead);
+                    }
                 }
             }
 
@@ -1144,7 +1183,14 @@ public class QualityService {
                 extra.put("apacheScore", getScoreTotal(score));
                 Object apacheII = score.get("apacheII");
                 double calDead = 0;
-                if (apacheII instanceof Map) calDead = NumberUtils.safeNumber(((Map<?, ?>) apacheII).get("calDead"));
+                if (apacheII instanceof Map) {
+                    Object calDeadObj = ((Map<?, ?>) apacheII).get("calDead");
+                    if (calDeadObj instanceof Map) {
+                        calDead = NumberUtils.safeNumber(((Map<?, ?>) calDeadObj).get("score"));
+                    } else if (calDeadObj != null) {
+                        calDead = NumberUtils.safeNumber(calDeadObj);
+                    }
+                }
                 extra.put("predictedMortality", trimTrailingZeros(calDead * 1000, 2));
                 rows.add(toPatientDetailRow(patient, rows.size() + 1, monthKey, extra));
             }
@@ -1164,7 +1210,7 @@ public class QualityService {
                 new Query(Criteria.where("pid").in(pids)
                         .and("scoreType").is("apacheII")
                         .and("valid").is(true)),
-                Document.class, "score");
+                Document.class, CollectionConstants.SCORE);
 
         Map<String, List<Document>> grouped = new LinkedHashMap<>();
         for (Document score : scores) {
@@ -1189,7 +1235,7 @@ public class QualityService {
                 new Query(Criteria.where("pid").in(pids)
                         .and("scoreType").is("apacheII")
                         .and("valid").is(true)),
-                Document.class, "score");
+                Document.class, CollectionConstants.SCORE);
 
         Map<String, Document> result = new LinkedHashMap<>();
         for (Document score : scores) {
@@ -1279,7 +1325,16 @@ public class QualityService {
             for (String field : QUALITY_DEPARTMENT_FIELDS) {
                 deptOr.add(new Document(field, new Document("$regex", escaped).append("$options", "i")));
             }
-            filter.append("$or", deptOr);
+            // 如果 extra 中已有 $or，需要用 $and 包裹避免覆盖
+            if (filter.containsKey("$or")) {
+                Object existingOr = filter.remove("$or");
+                List<Document> andList = new ArrayList<>();
+                andList.add(new Document("$or", existingOr));
+                andList.add(new Document("$or", deptOr));
+                filter.append("$and", andList);
+            } else {
+                filter.append("$or", deptOr);
+            }
         }
         return filter;
     }
@@ -1306,7 +1361,7 @@ public class QualityService {
                 "dischargedType", "dischargeType", "outType",
                 "dischargedDepartment", "transferDept", "outDeptName",
                 "admissionDiagnosis", "diagnosis", "clinicalDiagnosis", "primaryDiagnosis", "status");
-        return smartCareMongo.find(query, Document.class, "patient");
+        return smartCareMongo.find(query, Document.class, CollectionConstants.PATIENT);
     }
 
     private List<Document> findPatientsSorted(Document filter) {
@@ -1322,11 +1377,11 @@ public class QualityService {
                 "dischargedType", "dischargeType", "outType",
                 "dischargedDepartment", "transferDept", "outDeptName",
                 "admissionDiagnosis", "diagnosis", "clinicalDiagnosis", "primaryDiagnosis", "status");
-        return smartCareMongo.find(query, Document.class, "patient");
+        return smartCareMongo.find(query, Document.class, CollectionConstants.PATIENT);
     }
 
     private int countPatients(Document filter) {
-        return (int) smartCareMongo.count(new BasicQuery(filter), Document.class, "patient");
+        return (int) smartCareMongo.count(new BasicQuery(filter), Document.class, CollectionConstants.PATIENT);
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -1403,7 +1458,7 @@ public class QualityService {
                 .append("$or", Arrays.asList(
                         new Document("indicatorCode", indicatorCode),
                         new Document("indicator", indicatorName)));
-        List<Document> docs = smartCareMongo.find(new BasicQuery(filter), Document.class, "qualityData");
+        List<Document> docs = dataCenterMongo.find(new BasicQuery(filter), Document.class, CollectionConstants.VI_ICU_QUALITY);
         return docs.isEmpty() ? 0 : NumberUtils.safeNumber(docs.get(0).get("indicatorData"));
     }
 

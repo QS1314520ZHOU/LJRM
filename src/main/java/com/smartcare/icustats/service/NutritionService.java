@@ -1,5 +1,6 @@
 package com.smartcare.icustats.service;
 
+import com.smartcare.icustats.config.CollectionConstants;
 import com.smartcare.icustats.dto.MonthRange;
 import com.smartcare.icustats.util.DateRangeUtils;
 import com.smartcare.icustats.util.NumberUtils;
@@ -218,8 +219,8 @@ public class NutritionService {
         }
 
         // Aggregate by date+pid, then by date
-        List<Document> allDocs = dataCenterMongo.find(
-                new BasicQuery(new Document("$and", matchPipeline)), Document.class, "drugExe");
+        List<Document> allDocs = smartCareMongo.find(
+                new BasicQuery(new Document("$and", matchPipeline)), Document.class, CollectionConstants.DRUG_EXE);
 
         Map<String, Set<String>> datePidMap = new LinkedHashMap<>();
         days.forEach(d -> datePidMap.put(d, new LinkedHashSet<>()));
@@ -260,8 +261,8 @@ public class NutritionService {
             return Map.of("indicator", indicator, "columns", DAILY_DETAIL_COLUMNS, "rows", Collections.emptyList());
         }
 
-        List<Document> drugRecords = dataCenterMongo.find(
-                new BasicQuery(new Document("$and", matchPipeline)), Document.class, "drugExe");
+        List<Document> drugRecords = smartCareMongo.find(
+                new BasicQuery(new Document("$and", matchPipeline)), Document.class, CollectionConstants.DRUG_EXE);
 
         if (drugRecords.isEmpty()) {
             return Map.of("indicator", indicator, "columns", DAILY_DETAIL_COLUMNS, "rows", Collections.emptyList());
@@ -308,8 +309,8 @@ public class NutritionService {
             return Map.of("columns", (Object) columns, "rows", Collections.emptyList());
         }
 
-        List<Document> drugRecords = dataCenterMongo.find(
-                new BasicQuery(new Document("$and", matchPipeline)), Document.class, "drugExe");
+        List<Document> drugRecords = smartCareMongo.find(
+                new BasicQuery(new Document("$and", matchPipeline)), Document.class, CollectionConstants.DRUG_EXE);
 
         if (drugRecords.isEmpty()) {
             return Map.of("columns", (Object) columns, "rows", Collections.emptyList());
@@ -366,8 +367,8 @@ public class NutritionService {
         List<Document> matchPipeline = buildDrugExeMatch(fullRange.getStartDate(), fullRange.getEndDate(), keywords, department);
         if (matchPipeline == null) return emptyMonthMap(months);
 
-        List<Document> docs = dataCenterMongo.find(
-                new BasicQuery(new Document("$and", matchPipeline)), Document.class, "drugExe");
+        List<Document> docs = smartCareMongo.find(
+                new BasicQuery(new Document("$and", matchPipeline)), Document.class, CollectionConstants.DRUG_EXE);
 
         // pid dedup per month
         Map<String, Set<String>> monthPidMap = new LinkedHashMap<>();
@@ -395,8 +396,8 @@ public class NutritionService {
         List<Document> matchPipeline = buildDrugExeMatch(fullRange.getStartDate(), fullRange.getEndDate(), ENTERAL_KEYWORDS, department);
         if (matchPipeline == null) return emptyMonthMap(months);
 
-        List<Document> docs = dataCenterMongo.find(
-                new BasicQuery(new Document("$and", matchPipeline)), Document.class, "drugExe");
+        List<Document> docs = smartCareMongo.find(
+                new BasicQuery(new Document("$and", matchPipeline)), Document.class, CollectionConstants.DRUG_EXE);
 
         Map<String, Integer> countMap = new LinkedHashMap<>();
         months.forEach(m -> countMap.put(m, 0));
@@ -417,8 +418,8 @@ public class NutritionService {
         List<Document> matchPipeline = buildDrugExeMatch(fullRange.getStartDate(), fullRange.getEndDate(), ENTERAL_POWDER_KEYWORDS, department);
         if (matchPipeline == null) return emptyMonthMap(months);
 
-        List<Document> docs = dataCenterMongo.find(
-                new BasicQuery(new Document("$and", matchPipeline)), Document.class, "drugExe");
+        List<Document> docs = smartCareMongo.find(
+                new BasicQuery(new Document("$and", matchPipeline)), Document.class, CollectionConstants.DRUG_EXE);
 
         Map<String, Integer> countMap = new LinkedHashMap<>();
         months.forEach(m -> countMap.put(m, 0));
@@ -444,7 +445,7 @@ public class NutritionService {
             tubeMatch.append("pid", new Document("$in", deptPids));
         }
         List<Document> tubeRecords = smartCareMongo.find(
-                new BasicQuery(tubeMatch), Document.class, "tubeExe");
+                new BasicQuery(tubeMatch), Document.class, CollectionConstants.TUBE_EXE);
 
         if (tubeRecords.isEmpty()) return emptyMonthMap(months);
 
@@ -501,7 +502,7 @@ public class NutritionService {
         List<String> deptPids = getDepartmentPatientIds(department);
         if (deptPids != null) tubeMatch.append("pid", new Document("$in", deptPids));
 
-        List<Document> tubeRecords = smartCareMongo.find(new BasicQuery(tubeMatch), Document.class, "tubeExe");
+        List<Document> tubeRecords = smartCareMongo.find(new BasicQuery(tubeMatch), Document.class, CollectionConstants.TUBE_EXE);
         if (tubeRecords.isEmpty()) {
             return Map.of("indicator", indicator, "columns", GASTRIC_TUBE_DETAIL_COLUMNS, "rows", Collections.emptyList());
         }
@@ -567,8 +568,8 @@ public class NutritionService {
             return Map.of("indicator", indicator, "columns", ENTERAL_BASE_DETAIL_COLUMNS, "rows", Collections.emptyList());
         }
 
-        List<Document> rawRecords = dataCenterMongo.find(
-                new BasicQuery(new Document("$and", matchPipeline)), Document.class, "drugExe");
+        List<Document> rawRecords = smartCareMongo.find(
+                new BasicQuery(new Document("$and", matchPipeline)), Document.class, CollectionConstants.DRUG_EXE);
 
         // pid + month dedup
         Set<String> seen = new HashSet<>();
@@ -653,8 +654,8 @@ public class NutritionService {
             return Map.of("indicator", indicator, "columns", DAILY_DETAIL_COLUMNS, "rows", Collections.emptyList());
         }
 
-        List<Document> drugRecords = dataCenterMongo.find(
-                new BasicQuery(new Document("$and", matchPipeline)), Document.class, "drugExe");
+        List<Document> drugRecords = smartCareMongo.find(
+                new BasicQuery(new Document("$and", matchPipeline)), Document.class, CollectionConstants.DRUG_EXE);
 
         // Filter to months range
         String firstMonth = months.get(0);
@@ -701,8 +702,8 @@ public class NutritionService {
         // Load drug method map
         Map<String, String> methodMap = getDrugMethodMap();
 
-        List<Document> drugRecords = dataCenterMongo.find(
-                new BasicQuery(new Document("$and", matchPipeline)), Document.class, "drugExe");
+        List<Document> drugRecords = smartCareMongo.find(
+                new BasicQuery(new Document("$and", matchPipeline)), Document.class, CollectionConstants.DRUG_EXE);
 
         String firstMonth = months.get(0);
         String lastMonth = months.get(months.size() - 1);
@@ -769,8 +770,8 @@ public class NutritionService {
             return Map.of("indicator", indicator, "columns", NUTRITION_DETAIL_COLUMNS, "rows", Collections.emptyList());
         }
 
-        List<Document> rawRecords = dataCenterMongo.find(
-                new BasicQuery(new Document("$and", matchPipeline)), Document.class, "drugExe");
+        List<Document> rawRecords = smartCareMongo.find(
+                new BasicQuery(new Document("$and", matchPipeline)), Document.class, CollectionConstants.DRUG_EXE);
 
         Set<String> seen = new HashSet<>();
         List<String> dedupedPids = new ArrayList<>();
@@ -870,7 +871,7 @@ public class NutritionService {
         Query examQuery = new Query(Criteria.where("mrn").in(mrns)
                 .and("valid").ne(false));
         examQuery.fields().include("reportID").include("mrn").include("authTime");
-        List<Document> exams = dataCenterMongo.find(examQuery, Document.class, "viIcuExam");
+        List<Document> exams = dataCenterMongo.find(examQuery, Document.class, CollectionConstants.VI_ICU_EXAM);
 
         if (exams.isEmpty()) return map;
 
@@ -885,7 +886,7 @@ public class NutritionService {
         Query itemQuery = new Query(Criteria.where("examID").in(examIds)
                 .and("itemCode").in(itemCodes));
         itemQuery.fields().include("examID").include("itemCode").include("result");
-        List<Document> items = dataCenterMongo.find(itemQuery, Document.class, "viIcuExamItem");
+        List<Document> items = dataCenterMongo.find(itemQuery, Document.class, CollectionConstants.VI_ICU_EXAM_ITEM);
 
         for (Document it : items) {
             Document exam = examMap.get(String.valueOf(it.get("examID")));
@@ -1034,7 +1035,7 @@ public class NutritionService {
         }
         Document filter = new Document("$or", deptOr);
         filter.append("status", new Document("$ne", "invalid"));
-        List<Document> patients = smartCareMongo.find(new BasicQuery(filter), Document.class, "patient");
+        List<Document> patients = smartCareMongo.find(new BasicQuery(filter), Document.class, CollectionConstants.PATIENT);
         return patients.stream().map(p -> String.valueOf(p.get("_id"))).collect(Collectors.toList());
     }
 
@@ -1045,7 +1046,7 @@ public class NutritionService {
         Document filter = PatientUtils.buildPatientFilter(extra, department, enableDeptFilter);
         Query query = new BasicQuery(filter);
         query.fields().include(PATIENT_SELECT);
-        List<Document> patients = smartCareMongo.find(query, Document.class, "patient");
+        List<Document> patients = smartCareMongo.find(query, Document.class, CollectionConstants.PATIENT);
         Map<String, Document> map = new LinkedHashMap<>();
         for (Document p : patients) {
             map.put(String.valueOf(p.get("_id")), p);
@@ -1054,7 +1055,7 @@ public class NutritionService {
     }
 
     private Map<String, String> getDrugMethodMap() {
-        List<Document> list = smartCareMongo.find(new Query(), Document.class, "configDrugMethod");
+        List<Document> list = smartCareMongo.find(new Query(), Document.class, CollectionConstants.CONFIG_DRUG_METHOD);
         Map<String, String> map = new LinkedHashMap<>();
         for (Document doc : list) {
             map.put(NumberUtils.normalizeText(doc.get("code")), NumberUtils.normalizeText(doc.get("name")));

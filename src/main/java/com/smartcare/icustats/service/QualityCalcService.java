@@ -1,5 +1,6 @@
 package com.smartcare.icustats.service;
 
+import com.smartcare.icustats.config.CollectionConstants;
 import com.smartcare.icustats.dto.MonthRange;
 import com.smartcare.icustats.util.DateRangeUtils;
 import com.smartcare.icustats.util.NumberUtils;
@@ -80,10 +81,15 @@ public class QualityCalcService {
             List<Document> deptOr = new ArrayList<>();
             deptOr.add(new Document("deptName", department));
             deptOr.add(new Document("department", department));
-            filter.append("$or", deptOr);
+            // 用 $and 包裹两个 $or，避免覆盖
+            Object existingOr = filter.remove("$or");
+            List<Document> andList = new ArrayList<>();
+            andList.add(new Document("$or", existingOr));
+            andList.add(new Document("$or", deptOr));
+            filter.append("$and", andList);
         }
 
-        return smartCareMongo.find(new BasicQuery(filter), Document.class, "patient");
+        return smartCareMongo.find(new BasicQuery(filter), Document.class, CollectionConstants.PATIENT);
     }
 
     /**
@@ -211,7 +217,7 @@ public class QualityCalcService {
                 .and("valid").is(true)
                 .and("scoreType").is("apacheII"));
         scoreQuery.with(Sort.by(Sort.Direction.DESC, "time"));
-        List<Document> scores = smartCareMongo.find(scoreQuery, Document.class, "score");
+        List<Document> scores = smartCareMongo.find(scoreQuery, Document.class, CollectionConstants.SCORE);
 
         Map<String, List<Document>> grouped = new LinkedHashMap<>();
         for (Document s : scores) {
@@ -411,7 +417,7 @@ public class QualityCalcService {
                 .and("valid").ne(false)
                 .and("replace").ne(true)
                 .and("endTime").gte(start).lte(end));
-        List<Document> tubes = smartCareMongo.find(tubeQuery, Document.class, "tubeExe");
+        List<Document> tubes = smartCareMongo.find(tubeQuery, Document.class, CollectionConstants.TUBE_EXE);
 
         if (tubes.isEmpty()) {
             Map<String, Object> result = new LinkedHashMap<>();
@@ -436,7 +442,7 @@ public class QualityCalcService {
                 .and("valid").ne(false)
                 .and("replace").ne(true));
         historyQuery.with(Sort.by(Sort.Direction.ASC, "startTime"));
-        List<Document> allHistory = smartCareMongo.find(historyQuery, Document.class, "tubeExe");
+        List<Document> allHistory = smartCareMongo.find(historyQuery, Document.class, CollectionConstants.TUBE_EXE);
 
         Map<String, List<Document>> byPid = new LinkedHashMap<>();
         for (Document t : allHistory) {
@@ -478,7 +484,7 @@ public class QualityCalcService {
         // Patients discharged during the month with type containing "转出"
         Query outQuery = new Query(Criteria.where("icuDischargeTime").gte(start).lte(end)
                 .and("dischargedType").regex("转出"));
-        List<Document> out = smartCareMongo.find(outQuery, Document.class, "patient");
+        List<Document> out = smartCareMongo.find(outQuery, Document.class, CollectionConstants.PATIENT);
 
         if (out.isEmpty()) return mapOf("num", 0, "denom", 0);
 
@@ -492,7 +498,7 @@ public class QualityCalcService {
         Query allQuery = new Query(Criteria.where("mrn").in(mrns));
         allQuery.with(Sort.by(Sort.Direction.ASC, "icuAdmissionTime"));
         allQuery.fields().include("mrn").include("icuAdmissionTime").include("icuDischargeTime");
-        List<Document> all = smartCareMongo.find(allQuery, Document.class, "patient");
+        List<Document> all = smartCareMongo.find(allQuery, Document.class, CollectionConstants.PATIENT);
 
         Map<String, List<Document>> byMrn = new LinkedHashMap<>();
         for (Document p : all) {
@@ -575,7 +581,7 @@ public class QualityCalcService {
                 .and("orderTime").lte(end)
                 .and("orderName").regex("流质饮食")
                 .and("orderName").regex("^((?!撤销).)*$"));
-        List<Document> orders = dataCenterMongo.find(orderQuery, Document.class, "VI_ICU_ZYYZ");
+        List<Document> orders = dataCenterMongo.find(orderQuery, Document.class, CollectionConstants.VI_ICU_ZYYZ);
 
         // Group order times by mrn
         Map<String, List<Date>> orderTimesByMrn = new LinkedHashMap<>();
@@ -654,7 +660,7 @@ public class QualityCalcService {
         Document orderFilter = orderQuery(monthKey, Collections.singletonList("抢救"));
         List<Document> rescueOrders = dataCenterMongo.find(
                 new BasicQuery(orderFilter),
-                Document.class, "VI_ICU_ZYYZ"
+                Document.class, CollectionConstants.VI_ICU_ZYYZ
         );
 
         List<String> mrns = rescueOrders.stream()
@@ -669,7 +675,7 @@ public class QualityCalcService {
 
         Query patientQuery = new Query(Criteria.where("mrn").in(mrns));
         patientQuery.fields().include("mrn").include("dischargedType");
-        List<Document> patients = smartCareMongo.find(patientQuery, Document.class, "patient");
+        List<Document> patients = smartCareMongo.find(patientQuery, Document.class, CollectionConstants.PATIENT);
 
         Map<String, Document> byMrn = new LinkedHashMap<>();
         for (Document p : patients) {
@@ -718,7 +724,7 @@ public class QualityCalcService {
                         .and("year").is(year)
                         .and("month").is(month)
                         .and("indicatorCode").is(indicatorCode)),
-                Document.class, "VI_ICU_QUALITY"
+                Document.class, CollectionConstants.VI_ICU_QUALITY
         );
 
         if (doc == null) return 0;
@@ -816,7 +822,7 @@ public class QualityCalcService {
         Query query = new BasicQuery(filter);
         query.addCriteria(Criteria.where("mrn").in(mrns));
         query.fields().include("mrn").include("orderTime");
-        List<Document> orders = dataCenterMongo.find(query, Document.class, "VI_ICU_ZYYZ");
+        List<Document> orders = dataCenterMongo.find(query, Document.class, CollectionConstants.VI_ICU_ZYYZ);
 
         return matchPatientsByOrders(patients, orders, monthRange(monthKey).getEndDate());
     }

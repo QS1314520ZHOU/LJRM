@@ -1,5 +1,6 @@
 package com.smartcare.icustats.service;
 
+import com.smartcare.icustats.config.CollectionConstants;
 import org.bson.Document;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -358,7 +359,7 @@ public class StatsService {
         Document filter = buildAdmissionRangeFilter(startDate, endDate, department);
         Query query = new BasicQuery(filter);
         query.fields().include(PATIENT_SELECT.toArray(new String[0]));
-        return smartCareMongoTemplate.find(query, Document.class, "patient");
+        return smartCareMongoTemplate.find(query, Document.class, CollectionConstants.PATIENT);
     }
 
     /**
@@ -370,7 +371,7 @@ public class StatsService {
 
         Query orderQuery = new BasicQuery(orderFilter);
         orderQuery.fields().include("mrn").include("orderTime");
-        List<Document> orders = dataCenterMongoTemplate.find(orderQuery, Document.class, "order");
+        List<Document> orders = dataCenterMongoTemplate.find(orderQuery, Document.class, CollectionConstants.VI_ICU_ZYYZ);
 
         Map<String, List<Date>> mrnToOrderTimes = new HashMap<>();
         for (Document order : orders) {
@@ -390,7 +391,7 @@ public class StatsService {
         Document patientFilter = buildPatientFilter(new Document("mrn", new Document("$in", mrns)), department);
         Query patientQuery = new BasicQuery(patientFilter);
         patientQuery.fields().include(PATIENT_SELECT.toArray(new String[0]));
-        List<Document> patients = smartCareMongoTemplate.find(patientQuery, Document.class, "patient");
+        List<Document> patients = smartCareMongoTemplate.find(patientQuery, Document.class, CollectionConstants.PATIENT);
 
         Map<String, List<Document>> patientsByMrn = new HashMap<>();
         for (Document patient : patients) {
@@ -540,7 +541,7 @@ public class StatsService {
 
         Query bedsideQuery = new BasicQuery(bedsideFilter);
         bedsideQuery.fields().include("pid").include("code").include("strVal").include("time").include("editTime");
-        List<Document> events = dataCenterMongoTemplate.find(bedsideQuery, Document.class, "bedside");
+        List<Document> events = smartCareMongoTemplate.find(bedsideQuery, Document.class, CollectionConstants.BEDSIDE);
 
         Map<String, List<Document>> grouped = groupByPid(events);
 
@@ -599,7 +600,7 @@ public class StatsService {
 
         Query crrtQuery = new BasicQuery(crrtFilter);
         crrtQuery.fields().include("pid").include("code").include("strVal").include("time").include("editTime");
-        List<Document> crrtEvents = dataCenterMongoTemplate.find(crrtQuery, Document.class, "bedside");
+        List<Document> crrtEvents = smartCareMongoTemplate.find(crrtQuery, Document.class, CollectionConstants.BEDSIDE);
 
         Set<String> matched = new HashSet<>();
         for (Document event : crrtEvents) {
@@ -637,7 +638,7 @@ public class StatsService {
 
         Query crrtQuery = new BasicQuery(crrtFilter);
         crrtQuery.fields().include("pid").include("code").include("strVal").include("time").include("editTime");
-        List<Document> crrtEvents = dataCenterMongoTemplate.find(crrtQuery, Document.class, "bedside");
+        List<Document> crrtEvents = smartCareMongoTemplate.find(crrtQuery, Document.class, CollectionConstants.BEDSIDE);
 
         Set<String> matched = new HashSet<>();
         for (Document event : crrtEvents) {

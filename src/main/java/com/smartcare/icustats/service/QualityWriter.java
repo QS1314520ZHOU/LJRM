@@ -1,6 +1,7 @@
 package com.smartcare.icustats.service;
 
 import com.smartcare.icustats.util.DateRangeUtils;
+import com.smartcare.icustats.config.CollectionConstants;
 import com.smartcare.icustats.dto.MonthRange;
 import org.bson.Document;
 import org.slf4j.Logger;
@@ -112,11 +113,11 @@ public class QualityWriter {
         Document q = mongoTemplate.findAndModify(
                 query, update,
                 FindAndModifyOptions.options().upsert(true).returnNew(true),
-                Document.class, "doctorQuality");
+                Document.class, CollectionConstants.DOCTOR_QUALITY);
 
         if (q == null) {
             // After upsert the document may not be returned; re-query it
-            q = mongoTemplate.findOne(query, Document.class, "doctorQuality");
+            q = mongoTemplate.findOne(query, Document.class, CollectionConstants.DOCTOR_QUALITY);
         }
         if (q == null) {
             log.warn("Failed to upsert DoctorQuality for code={}, monthKey={}", code, monthKey);
@@ -128,7 +129,7 @@ public class QualityWriter {
         // 2. Delete existing detail records BEFORE deleting items (MongoDB has no cascade delete)
         List<Document> existingItems = mongoTemplate.find(
                 new Query(Criteria.where("qualityId").is(qualityId)),
-                Document.class, "doctorQualityItem");
+                Document.class, CollectionConstants.DOCTOR_QUALITY_ITEM);
         if (!existingItems.isEmpty()) {
             List<ObjectId> itemIds = existingItems.stream()
                     .map(doc -> doc.getObjectId("_id"))
@@ -137,14 +138,14 @@ public class QualityWriter {
             if (!itemIds.isEmpty()) {
                 mongoTemplate.remove(
                         new Query(Criteria.where("itemId").in(itemIds)),
-                        "doctorQualityItemDetail");
+                        CollectionConstants.DOCTOR_QUALITY_ITEM_DETAIL);
             }
         }
 
         // 3. Delete existing items
         mongoTemplate.remove(
                 new Query(Criteria.where("qualityId").is(qualityId)),
-                "doctorQualityItem");
+                CollectionConstants.DOCTOR_QUALITY_ITEM);
 
         // 4. Insert items + detail
         for (int i = 0; i < items.size(); i++) {
@@ -154,7 +155,7 @@ public class QualityWriter {
                     .append("order", i)
                     .append("itemName", it.getName())
                     .append("itemData", it.getValue());
-            mongoTemplate.insert(itemDoc, "doctorQualityItem");
+            mongoTemplate.insert(itemDoc, CollectionConstants.DOCTOR_QUALITY_ITEM);
 
             ObjectId itemId = itemDoc.getObjectId("_id");
 
@@ -163,7 +164,7 @@ public class QualityWriter {
                 for (String pid : it.getPids()) {
                     details.add(new Document("itemId", itemId).append("pid", pid));
                 }
-                mongoTemplate.insert(details, "doctorQualityItemDetail");
+                mongoTemplate.insert(details, CollectionConstants.DOCTOR_QUALITY_ITEM_DETAIL);
             }
         }
     }
@@ -424,7 +425,7 @@ public class QualityWriter {
                 query.addCriteria(deptOr);
             }
 
-            long cnt = mongoTemplate.count(query, "patient");
+            long cnt = mongoTemplate.count(query, CollectionConstants.PATIENT);
             total += cnt;
             day = day.plusDays(1);
         }
