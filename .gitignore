@@ -25,3 +25,6 @@ nohup.out
 
 # Dependencies
 node_modules/
+
+# Nested repo (old Node.js version)
+icu-stats/
