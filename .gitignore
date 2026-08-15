@@ -1,12 +1,5 @@
-﻿node_modules/
-.npm-cache/
-.env
-.env.local
-.env.production
-
-# Build output
+# Maven 构建产物
 target/
-dist/
 
 # IDE
 .idea/
@@ -14,10 +7,21 @@ dist/
 *.iml
 *.class
 
-# OS
+# 编辑器历史
+.history/
+
+# 环境变量文件
+.env
+.env.local
+.env.production
+
+# 操作系统
 .DS_Store
 Thumbs.db
 
-# Logs
+# 日志
 *.log
 nohup.out
+
+# Dependencies
+node_modules/
