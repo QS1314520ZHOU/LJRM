@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>血糖 IRI 统计</title>
+    <link rel="stylesheet" href="blood-sugar.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>血糖 IRI 统计</h2>
+            <div id="patientInfo" class="patient-info" style="display:none;">
+                <span id="patientName"></span>
+                <span id="patientMrn"></span>
+                <span id="patientBed"></span>
+                <span id="patientGender"></span>
+                <span id="patientAge"></span>
+            </div>
+        </div>
+
+        <div id="loading" class="loading" style="display:none;">加载中...</div>
+        <div id="error" class="error" style="display:none;"></div>
+        <div id="empty" class="empty" style="display:none;">暂无血糖数据</div>
+
+        <div id="content" style="display:none;">
+            <div class="toolbar">
+                <button id="btnExport" class="btn btn-primary">导出 Excel</button>
+            </div>
+            <div class="table-wrapper">
+                <table id="dataTable">
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>血糖 (mmol/L)</th>
+                            <th>胰岛素 (U)</th>
+                            <th>激素当量 (mg)</th>
+                            <th>校正因子</th>
+                            <th>IRI</th>
+                            <th>激素详情</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="vendor/xlsx.full.min.js"></script>
+    <script src="blood-sugar.js"></script>
+</body>
+</html>

@@ -20,6 +20,7 @@ public final class CollectionConstants {
     public static final String PATIENT = "patient";
     public static final String BEDSIDE = "bedside";
     public static final String BED_RECORD = "bedRecord";
+    public static final String BLOOD_SUGAR = "bloodSugar";
     public static final String SCORE = "score";
     public static final String TUBE_EXE = "tubeExe";
     public static final String DRUG_EXE = "drugExe";
