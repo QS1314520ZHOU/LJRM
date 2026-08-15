@@ -22,6 +22,14 @@ mongodb:
 icu-stats:
   enable-dept-filter: ${ENABLE_DEPT_FILTER:false}
   timezone: ${TZ:Asia/Shanghai}
+  quality-source-mode: ${QUALITY_SOURCE_MODE:auto}
+  quality-diagnostic-enabled: ${QUALITY_DIAGNOSTIC_ENABLED:false}
+  quality-rebuild-enabled: ${QUALITY_REBUILD_ENABLED:false}
+  quality-rebuild-start-month: ${QUALITY_REBUILD_START_MONTH:}
+  quality-rebuild-end-month: ${QUALITY_REBUILD_END_MONTH:}
+  quality-rebuild-dept-code: ${QUALITY_REBUILD_DEPT_CODE:0211}
+  quality-rebuild-department: ${QUALITY_REBUILD_DEPARTMENT:重症医学科}
+  quality-rebuild-dry-run: ${QUALITY_REBUILD_DRY_RUN:true}
 
 logging:
   level:

@@ -1,11 +1,13 @@
 package com.smartcare.icustats.service;
 
 import com.smartcare.icustats.config.CollectionConstants;
+import com.smartcare.icustats.config.IcuStatsProperties;
 import com.smartcare.icustats.dto.MonthRange;
 import com.smartcare.icustats.util.DateRangeUtils;
 import com.smartcare.icustats.util.NumberUtils;
 import com.smartcare.icustats.util.PatientUtils;
 import org.bson.Document;
+import org.bson.types.ObjectId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -166,13 +168,19 @@ public class QualityService {
 
     private final MongoTemplate smartCareMongo;
     private final MongoTemplate dataCenterMongo;
+    private final IcuStatsProperties properties;
+    private final QualityCalcService qualityCalcService;
 
     @Autowired
     public QualityService(
             @Qualifier("smartCareMongoTemplate") MongoTemplate smartCareMongo,
-            @Qualifier("dataCenterMongoTemplate") MongoTemplate dataCenterMongo) {
+            @Qualifier("dataCenterMongoTemplate") MongoTemplate dataCenterMongo,
+            IcuStatsProperties properties,
+            QualityCalcService qualityCalcService) {
         this.smartCareMongo = smartCareMongo;
         this.dataCenterMongo = dataCenterMongo;
+        this.properties = properties;
+        this.qualityCalcService = qualityCalcService;
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -445,26 +453,30 @@ public class QualityService {
 
     private List<Document> fetchItemsByQualityIds(List<String> qualityIds) {
         if (qualityIds.isEmpty()) return Collections.emptyList();
+        List<Object> ids = buildDualTypeIds(qualityIds);
         return smartCareMongo.find(
-                new Query(Criteria.where("qualityId").in(qualityIds)), Document.class, CollectionConstants.DOCTOR_QUALITY_ITEM);
+                new Query(Criteria.where("qualityId").in(ids)), Document.class, CollectionConstants.DOCTOR_QUALITY_ITEM);
     }
 
     private List<Document> fetchQcItemsByQualityIds(List<String> qualityIds) {
         if (qualityIds.isEmpty()) return Collections.emptyList();
+        List<Object> ids = buildDualTypeIds(qualityIds);
         return smartCareMongo.find(
-                new Query(Criteria.where("qualityId").in(qualityIds)), Document.class, "doctorQCIData");
+                new Query(Criteria.where("qualityId").in(ids)), Document.class, "doctorQCIData");
     }
 
     private List<Document> fetchDetailRowsByItemIds(List<String> itemIds) {
         if (itemIds.isEmpty()) return Collections.emptyList();
+        List<Object> ids = buildDualTypeIds(itemIds);
         return smartCareMongo.find(
-                new Query(Criteria.where("itemId").in(itemIds)), Document.class, CollectionConstants.DOCTOR_QUALITY_ITEM_DETAIL);
+                new Query(Criteria.where("itemId").in(ids)), Document.class, CollectionConstants.DOCTOR_QUALITY_ITEM_DETAIL);
     }
 
     private List<Document> fetchQcDetailRowsByItemIds(List<String> itemIds) {
         if (itemIds.isEmpty()) return Collections.emptyList();
+        List<Object> ids = buildDualTypeIds(itemIds);
         return smartCareMongo.find(
-                new Query(Criteria.where("itemId").in(itemIds)), Document.class, "doctorQCIDetail");
+                new Query(Criteria.where("itemId").in(ids)), Document.class, "doctorQCIDetail");
     }
 
     private List<String> extractIds(List<Document> docs) {
@@ -473,6 +485,22 @@ public class QualityService {
 
     private List<String> extractItemIds(List<Document> items) {
         return items.stream().map(d -> d.get("_id").toString()).collect(Collectors.toList());
+    }
+
+    /**
+     * Build a list containing both String and ObjectId versions of each ID.
+     * This ensures queries match regardless of whether the DB stores the field
+     * as an ObjectId or a String representation.
+     */
+    private List<Object> buildDualTypeIds(List<String> stringIds) {
+        List<Object> ids = new ArrayList<>(stringIds.size() * 2);
+        for (String id : stringIds) {
+            ids.add(id);
+            if (ObjectId.isValid(id)) {
+                ids.add(new ObjectId(id));
+            }
+        }
+        return ids;
     }
 
     private List<Document> filterByCode(List<Document> docs, String code) {
@@ -535,7 +563,7 @@ public class QualityService {
             MonthRange range = DateRangeUtils.getMonthRange(monthKey);
             int newAdmissions = countPatients(buildPatientFilter(
                     new Document("icuAdmissionTime", new Document("$gte", range.getStartDate()).append("$lte", range.getEndDate())),
-                    department, true));
+                    department, properties.isEnableDeptFilter()));
             int icuCensus = countPatients(buildMonthlyOverlapFilter(range.getStartDate(), range.getEndDate(), department));
 
             Map<String, Integer> stats = new LinkedHashMap<>();
@@ -617,6 +645,20 @@ public class QualityService {
                     .filter(p -> getFirstValue(p, "dischargedType", "dischargeType").contains("死亡"))
                     .count();
 
+            // Calculate non-apache indicators via QualityCalcService
+            Map<String, Object> shockBundle = qualityCalcService.calcShockBundle(monthKey, department);
+            Map<String, Object> dvt = qualityCalcService.calcDVT(monthKey, department);
+            Map<String, Object> extubation = qualityCalcService.calcExtubation(monthKey, department);
+            Map<String, Object> ret48h = qualityCalcService.calc48hReturn(monthKey, department);
+            Map<String, Object> shockUltrasound = qualityCalcService.calcShockUltrasound(monthKey, department);
+            Map<String, Object> shockHemodynamic = qualityCalcService.calcShockHemodynamic(monthKey, department);
+            Map<String, Object> ards = qualityCalcService.calcARDS(monthKey, department);
+            Map<String, Object> en48h = qualityCalcService.calcEN48h(monthKey, department);
+            Map<String, Object> pain = qualityCalcService.calcPain(monthKey, department);
+            Map<String, Object> sedation = qualityCalcService.calcSedation(monthKey, department);
+            Map<String, Object> rescue = qualityCalcService.calcRescue(monthKey);
+            Map<String, Object> brainInjury = qualityCalcService.calcBrainInjury(monthKey, department);
+
             Map<String, Object> stats = new LinkedHashMap<>();
             stats.put("icuCensus", icuCensus);
             stats.put("apacheGte15", apacheGte15);
@@ -627,6 +669,39 @@ public class QualityService {
             stats.put("predictedMortalityRate", icuCensus > 0 ? predictedMortalitySum / icuCensus : 0);
             stats.put("actualMortalityRate", icuCensus > 0 ? (double) deathCount / icuCensus : 0);
             stats.put("apacheLt15Death", apacheLt15Death);
+
+            // Non-apache indicators
+            stats.put("shockBundleNum", toLong(shockBundle.get("num")));
+            stats.put("shockBundleDenom", toLong(shockBundle.get("denom")));
+            stats.put("dvtNum", toLong(dvt.get("num")));
+            stats.put("dvtDenom", toLong(dvt.get("denom")));
+            @SuppressWarnings("unchecked")
+            Map<String, Object> unplannedMap = (Map<String, Object>) extubation.get("unplannedExtubationRate");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> reintubMap = (Map<String, Object>) extubation.get("reintubation48hRate");
+            stats.put("unplannedExtubationNum", toLong(unplannedMap.get("num")));
+            stats.put("unplannedExtubationDenom", toLong(unplannedMap.get("denom")));
+            stats.put("reintubation48hNum", toLong(reintubMap.get("num")));
+            stats.put("reintubation48hDenom", toLong(reintubMap.get("denom")));
+            stats.put("icuReturn48hNum", toLong(ret48h.get("num")));
+            stats.put("icuReturn48hDenom", toLong(ret48h.get("denom")));
+            stats.put("shockUltrasoundNum", toLong(shockUltrasound.get("num")));
+            stats.put("shockUltrasoundDenom", toLong(shockUltrasound.get("denom")));
+            stats.put("shockHemodynamicNum", toLong(shockHemodynamic.get("num")));
+            stats.put("shockHemodynamicDenom", toLong(shockHemodynamic.get("denom")));
+            stats.put("ardsNum", toLong(ards.get("num")));
+            stats.put("ardsDenom", toLong(ards.get("denom")));
+            stats.put("en48hNum", toLong(en48h.get("num")));
+            stats.put("en48hDenom", toLong(en48h.get("denom")));
+            stats.put("painNum", toLong(pain.get("num")));
+            stats.put("painDenom", toLong(pain.get("denom")));
+            stats.put("sedationNum", toLong(sedation.get("num")));
+            stats.put("sedationDenom", toLong(sedation.get("denom")));
+            stats.put("rescueNum", toLong(rescue.get("num")));
+            stats.put("rescueDenom", toLong(rescue.get("denom")));
+            stats.put("brainInjuryNum", toLong(brainInjury.get("num")));
+            stats.put("brainInjuryDenom", toLong(brainInjury.get("denom")));
+
             result.put(monthKey, stats);
         }
         return result;
@@ -841,6 +916,58 @@ public class QualityService {
                 result.put("numerator", NumberUtils.safeNumber(stats.get("actualMortalityRate")));
                 result.put("denominator", NumberUtils.safeNumber(stats.get("predictedMortalityRate")));
                 break;
+            case "shockBundleRate":
+                result.put("numerator", NumberUtils.safeNumber(stats.get("shockBundleNum")));
+                result.put("denominator", NumberUtils.safeNumber(stats.get("shockBundleDenom")));
+                break;
+            case "dvtRate":
+                result.put("numerator", NumberUtils.safeNumber(stats.get("dvtNum")));
+                result.put("denominator", NumberUtils.safeNumber(stats.get("dvtDenom")));
+                break;
+            case "unplannedExtubationRate":
+                result.put("numerator", NumberUtils.safeNumber(stats.get("unplannedExtubationNum")));
+                result.put("denominator", NumberUtils.safeNumber(stats.get("unplannedExtubationDenom")));
+                break;
+            case "reintubation48hRate":
+                result.put("numerator", NumberUtils.safeNumber(stats.get("reintubation48hNum")));
+                result.put("denominator", NumberUtils.safeNumber(stats.get("reintubation48hDenom")));
+                break;
+            case "icuReturn48hRate":
+                result.put("numerator", NumberUtils.safeNumber(stats.get("icuReturn48hNum")));
+                result.put("denominator", NumberUtils.safeNumber(stats.get("icuReturn48hDenom")));
+                break;
+            case "shockUltrasoundRate":
+                result.put("numerator", NumberUtils.safeNumber(stats.get("shockUltrasoundNum")));
+                result.put("denominator", NumberUtils.safeNumber(stats.get("shockUltrasoundDenom")));
+                break;
+            case "shockHemodynamicRate":
+                result.put("numerator", NumberUtils.safeNumber(stats.get("shockHemodynamicNum")));
+                result.put("denominator", NumberUtils.safeNumber(stats.get("shockHemodynamicDenom")));
+                break;
+            case "ardsRate":
+                result.put("numerator", NumberUtils.safeNumber(stats.get("ardsNum")));
+                result.put("denominator", NumberUtils.safeNumber(stats.get("ardsDenom")));
+                break;
+            case "en48hRate":
+                result.put("numerator", NumberUtils.safeNumber(stats.get("en48hNum")));
+                result.put("denominator", NumberUtils.safeNumber(stats.get("en48hDenom")));
+                break;
+            case "painRate":
+                result.put("numerator", NumberUtils.safeNumber(stats.get("painNum")));
+                result.put("denominator", NumberUtils.safeNumber(stats.get("painDenom")));
+                break;
+            case "sedationRate":
+                result.put("numerator", NumberUtils.safeNumber(stats.get("sedationNum")));
+                result.put("denominator", NumberUtils.safeNumber(stats.get("sedationDenom")));
+                break;
+            case "rescueSuccessRate":
+                result.put("numerator", NumberUtils.safeNumber(stats.get("rescueNum")));
+                result.put("denominator", NumberUtils.safeNumber(stats.get("rescueDenom")));
+                break;
+            case "acuteBrainInjuryRate":
+                result.put("numerator", NumberUtils.safeNumber(stats.get("brainInjuryNum")));
+                result.put("denominator", NumberUtils.safeNumber(stats.get("brainInjuryDenom")));
+                break;
             default:
                 result.put("numerator", 0.0);
                 result.put("denominator", 0.0);
@@ -857,7 +984,7 @@ public class QualityService {
         for (String monthKey : months) {
             MonthRange range = DateRangeUtils.getMonthRange(monthKey);
             Document filter = "newAdmissions".equals(indicatorKey)
-                    ? buildPatientFilter(new Document("icuAdmissionTime", new Document("$gte", range.getStartDate()).append("$lte", range.getEndDate())), department, true)
+                    ? buildPatientFilter(new Document("icuAdmissionTime", new Document("$gte", range.getStartDate()).append("$lte", range.getEndDate())), department, properties.isEnableDeptFilter())
                     : buildMonthlyOverlapFilter(range.getStartDate(), range.getEndDate(), department);
             List<Document> patients = findPatients(filter);
             for (Document patient : patients) {
@@ -946,7 +1073,7 @@ public class QualityService {
                 .distinct().collect(Collectors.toList());
         if (pids.isEmpty()) return Collections.emptyList();
 
-        List<Document> patients = findPatients(buildPatientFilter(new Document("_id", new Document("$in", pids)), department, true));
+        List<Document> patients = findPatients(buildPatientFilter(new Document("_id", new Document("$in", pids)), department, properties.isEnableDeptFilter()));
         Map<String, Document> patientById = new LinkedHashMap<>();
         for (Document p : patients) patientById.put(String.valueOf(p.get("_id")), p);
 
@@ -1317,26 +1444,14 @@ public class QualityService {
     // ════════════════════════════════════════════════════════════════════
 
     private Document buildPatientFilter(Document extra, String department, boolean enableDeptFilter) {
-        Document filter = new Document("status", new Document("$ne", "invalid"));
-        if (extra != null && !extra.isEmpty()) filter.putAll(extra);
-        if (enableDeptFilter && department != null && !department.isEmpty()) {
-            List<Document> deptOr = new ArrayList<>();
-            String escaped = Pattern.quote(department);
-            for (String field : QUALITY_DEPARTMENT_FIELDS) {
-                deptOr.add(new Document(field, new Document("$regex", escaped).append("$options", "i")));
-            }
-            // 如果 extra 中已有 $or，需要用 $and 包裹避免覆盖
-            if (filter.containsKey("$or")) {
-                Object existingOr = filter.remove("$or");
-                List<Document> andList = new ArrayList<>();
-                andList.add(new Document("$or", existingOr));
-                andList.add(new Document("$or", deptOr));
-                filter.append("$and", andList);
-            } else {
-                filter.append("$or", deptOr);
+        // Use PatientUtils for consistent department filtering behavior
+        Map<String, Object> extraMap = new LinkedHashMap<>();
+        if (extra != null) {
+            for (Map.Entry<String, Object> e : extra.entrySet()) {
+                extraMap.put(e.getKey(), e.getValue());
             }
         }
-        return filter;
+        return PatientUtils.buildPatientFilter(extraMap, department, enableDeptFilter);
     }
 
     private Document buildMonthlyOverlapFilter(Date startDate, Date endDate, String department) {
@@ -1346,7 +1461,7 @@ public class QualityService {
                                 new Document("icuDischargeTime", new Document("$gte", startDate)),
                                 new Document("icuDischargeTime", null),
                                 new Document("icuDischargeTime", new Document("$exists", false)))),
-                department, true);
+                department, properties.isEnableDeptFilter());
     }
 
     private List<Document> findPatients(Document filter) {
@@ -1469,7 +1584,7 @@ public class QualityService {
     private Map<String, List<Document>> buildItemsByQualityId(List<Document> items) {
         Map<String, List<Document>> map = new LinkedHashMap<>();
         for (Document item : items) {
-            String key = String.valueOf(item.get("qualityId"));
+            String key = normalizeIdKey(item.get("qualityId"));
             map.computeIfAbsent(key, k -> new ArrayList<>()).add(item);
         }
         for (List<Document> list : map.values()) {
@@ -1481,10 +1596,25 @@ public class QualityService {
     private Map<String, List<Document>> buildDetailsByItemId(List<Document> details) {
         Map<String, List<Document>> map = new LinkedHashMap<>();
         for (Document d : details) {
-            String key = String.valueOf(d.get("itemId"));
+            String key = normalizeIdKey(d.get("itemId"));
             map.computeIfAbsent(key, k -> new ArrayList<>()).add(d);
         }
         return map;
+    }
+
+    /**
+     * Normalize an ID value to a consistent string key.
+     * Handles both ObjectId and String types.
+     */
+    private static String normalizeIdKey(Object value) {
+        if (value == null) return "null";
+        if (value instanceof ObjectId) return value.toString();
+        String s = String.valueOf(value);
+        // If it looks like a hex ObjectId, normalize it
+        if (s.length() == 24 && s.matches("[0-9a-fA-F]{24}")) {
+            return s.toLowerCase();
+        }
+        return s;
     }
 
     private Map<String, Document> buildMonthDocMap(List<Document> docs) {
@@ -1511,7 +1641,7 @@ public class QualityService {
     }
 
     private List<Document> getItemsForDoc(Document doc, Map<String, List<Document>> itemsByQualityId) {
-        return itemsByQualityId.getOrDefault(doc.get("_id").toString(), Collections.emptyList());
+        return itemsByQualityId.getOrDefault(normalizeIdKey(doc.get("_id")), Collections.emptyList());
     }
 
     private boolean isOccupiedBedDayIndicator(Map<String, Object> spec) {
@@ -1607,6 +1737,16 @@ public class QualityService {
         Map<String, Object> map = new LinkedHashMap<>();
         for (int i = 0; i < pairs.length; i += 2) map.put(pairs[i], pairs[i + 1]);
         return map;
+    }
+
+    private static long toLong(Object value) {
+        if (value == null) return 0;
+        if (value instanceof Number) return ((Number) value).longValue();
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     private static class Sort {

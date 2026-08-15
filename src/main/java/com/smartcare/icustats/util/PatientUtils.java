@@ -34,7 +34,7 @@ public class PatientUtils {
      * 原Node.js: escapeRegExp(text)
      */
     public static String escapeRegExp(String text) {
-        return text.replaceAll("([.*+?^${}()|[\\]\\\\])", "\\\\$1");
+        return text.replaceAll("([.\\\\*+?^${}()|\\[\\]])", "\\\\$1");
     }
 
     /**

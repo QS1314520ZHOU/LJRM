@@ -2,7 +2,9 @@ package com.smartcare.icustats.service;
 
 import com.smartcare.icustats.util.DateRangeUtils;
 import com.smartcare.icustats.config.CollectionConstants;
+import com.smartcare.icustats.config.IcuStatsProperties;
 import com.smartcare.icustats.dto.MonthRange;
+import com.smartcare.icustats.util.PatientUtils;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.BasicQuery;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -42,6 +45,9 @@ public class QualityWriter {
 
     @Autowired
     private QualityCalcService qualityCalcService;
+
+    @Autowired
+    private IcuStatsProperties properties;
 
     // ==================== Inner DTO ====================
 
@@ -394,6 +400,7 @@ public class QualityWriter {
      */
     public long calcIcuBedDays(String monthKey, String department) {
         MonthRange range = DateRangeUtils.getMonthRange(monthKey);
+        boolean enableDeptFilter = properties.isEnableDeptFilter();
 
         // Determine date iteration bounds
         LocalDate startLocal = range.getStartDate().toInstant()
@@ -406,26 +413,9 @@ public class QualityWriter {
         while (!day.isAfter(endLocal)) {
             Date snap = Date.from(day.atStartOfDay(SHANGHAI_ZONE).toInstant());
 
-            Query query = new Query(Criteria.where("icuAdmissionTime").lte(snap));
-
-            // $or: discharge >= snap OR discharge null OR discharge missing
-            Criteria dischargeOr = new Criteria().orOperator(
-                    Criteria.where("icuDischargeTime").gte(snap),
-                    Criteria.where("icuDischargeTime").is(null),
-                    Criteria.where("icuDischargeTime").exists(false)
-            );
-            query.addCriteria(dischargeOr);
-
-            // department filter: deptName = department OR department = department
-            if (department != null && !department.isEmpty()) {
-                Criteria deptOr = new Criteria().orOperator(
-                        Criteria.where("deptName").is(department),
-                        Criteria.where("department").is(department)
-                );
-                query.addCriteria(deptOr);
-            }
-
-            long cnt = mongoTemplate.count(query, CollectionConstants.PATIENT);
+            // Use PatientUtils to build filter with proper dept filter handling
+            Document filter = PatientUtils.buildMonthlyOverlapFilter(snap, snap, department, enableDeptFilter);
+            long cnt = mongoTemplate.count(new BasicQuery(filter), CollectionConstants.PATIENT);
             total += cnt;
             day = day.plusDays(1);
         }

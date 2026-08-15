@@ -1,9 +1,11 @@
 package com.smartcare.icustats.service;
 
 import com.smartcare.icustats.config.CollectionConstants;
+import com.smartcare.icustats.config.IcuStatsProperties;
 import com.smartcare.icustats.dto.MonthRange;
 import com.smartcare.icustats.util.DateRangeUtils;
 import com.smartcare.icustats.util.NumberUtils;
+import com.smartcare.icustats.util.PatientUtils;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,6 +52,9 @@ public class QualityCalcService {
     @Qualifier("dataCenterMongoTemplate")
     private MongoTemplate dataCenterMongo;
 
+    @Autowired
+    private IcuStatsProperties properties;
+
     // ==================== Public API ====================
 
     /**
@@ -63,33 +68,27 @@ public class QualityCalcService {
     /**
      * Get patients who were in ICU at any point during the given month.
      * Original JS: getInIcuPatients(monthKey, department)
+     * Respects ENABLE_DEPT_FILTER configuration.
      */
     @SuppressWarnings("unchecked")
     public List<Document> getInIcuPatients(String monthKey, String department) {
         MonthRange range = monthRange(monthKey);
-        Date start = range.getStartDate();
-        Date end = range.getEndDate();
+        boolean enableDeptFilter = properties.isEnableDeptFilter();
+        Document filter = PatientUtils.buildMonthlyOverlapFilter(
+                range.getStartDate(), range.getEndDate(), department, enableDeptFilter);
 
-        Document filter = new Document("icuAdmissionTime", new Document("$lte", end));
-        List<Document> orList = new ArrayList<>();
-        orList.add(new Document("icuDischargeTime", new Document("$gte", start)));
-        orList.add(new Document("icuDischargeTime", null));
-        orList.add(new Document("icuDischargeTime", new Document("$exists", false)));
-        filter.append("$or", orList);
+        log.info("QUALITY_CALC getInIcuPatients month={} department={} enableDeptFilter={}",
+                monthKey, department, enableDeptFilter);
 
-        if (department != null && !department.isEmpty()) {
-            List<Document> deptOr = new ArrayList<>();
-            deptOr.add(new Document("deptName", department));
-            deptOr.add(new Document("department", department));
-            // 用 $and 包裹两个 $or，避免覆盖
-            Object existingOr = filter.remove("$or");
-            List<Document> andList = new ArrayList<>();
-            andList.add(new Document("$or", existingOr));
-            andList.add(new Document("$or", deptOr));
-            filter.append("$and", andList);
-        }
+        List<Document> patients = smartCareMongo.find(new BasicQuery(filter), Document.class, CollectionConstants.PATIENT);
 
-        return smartCareMongo.find(new BasicQuery(filter), Document.class, CollectionConstants.PATIENT);
+        long mrnCount = patients.stream()
+                .filter(p -> p.getString("mrn") != null && !p.getString("mrn").trim().isEmpty())
+                .count();
+        log.info("QUALITY_CALC getInIcuPatients result: patientCount={} patientWithMrnCount={}",
+                patients.size(), mrnCount);
+
+        return patients;
     }
 
     /**
@@ -355,7 +354,11 @@ public class QualityCalcService {
         Map<String, Object> denominatorMatched = getMatchedPatientsByOrderFilter(monthKey, patients, denomFilter);
 
         List<Document> denominatorDone = (List<Document>) denominatorMatched.get("done");
+        List<Document> denominatorAll = (List<Document>) denominatorMatched.get("denominator");
+
         if (denominatorDone.isEmpty()) {
+            log.info("QUALITY_CALC indicator=shockBundleRate month={} patientCount={} denomCandidateCount={} matchedPatientCount=0 status=NO_ORDER_CANDIDATE",
+                    monthKey, patients.size(), denominatorAll.size());
             return mapOf("num", 0, "denom", 0, "notDone", Collections.emptyList());
         }
 
@@ -368,6 +371,10 @@ public class QualityCalcService {
                 .collect(Collectors.toList());
 
         List<Document> numeratorDone = (List<Document>) numeratorMatched.get("done");
+
+        log.info("QUALITY_CALC indicator=shockBundleRate month={} enableDeptFilter={} patientCount={} denomCandidateCount={} matchedPatientCount={} numerator={} denominator={} source=live status=ok",
+                monthKey, properties.isEnableDeptFilter(), patients.size(), denominatorAll.size(), denominatorDone.size(), numeratorDone.size(), denominatorDone.size());
+
         return mapOf("num", numeratorDone.size(), "denom", denominatorDone.size(), "notDone", notDoneIds);
     }
 
@@ -400,6 +407,11 @@ public class QualityCalcService {
         Map<String, Object> matched = getMatchedPatientsByOrderFilter(monthKey, patients, filter);
         List<Document> done = (List<Document>) matched.get("done");
         List<Document> denominator = (List<Document>) matched.get("denominator");
+
+        log.info("QUALITY_CALC indicator=dvtRate month={} enableDeptFilter={} patientCount={} matchedPatientCount={} numerator={} denominator={} source=live status={}",
+                monthKey, properties.isEnableDeptFilter(), patients.size(), denominator.size(), done.size(), denominator.size(),
+                denominator.isEmpty() ? "NO_ORDER_CANDIDATE" : "ok");
+
         return mapOf("num", done.size(), "denom", denominator.size());
     }
 
@@ -465,6 +477,9 @@ public class QualityCalcService {
             }
         }
 
+        log.info("QUALITY_CALC indicator=unplannedExtubationRate month={} tubeRecordCount={} unplanned={} reintubated={} source=live status={}",
+                monthKey, tubes.size(), unplanned, reintubated, tubes.isEmpty() ? "NO_TUBE_RECORD" : "ok");
+
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("unplannedExtubationRate", mapOf("num", unplanned, "denom", tubes.size()));
         result.put("reintubation48hRate", mapOf("num", reintubated, "denom", tubes.size()));
@@ -525,6 +540,9 @@ public class QualityCalcService {
             }
         }
 
+        log.info("QUALITY_CALC indicator=icuReturn48hRate month={} dischargedPatientCount={} returnHit={} source=live status={}",
+                monthKey, out.size(), hit, out.isEmpty() ? "NO_PATIENT" : "ok");
+
         return mapOf("num", hit, "denom", out.size());
     }
 
@@ -569,7 +587,11 @@ public class QualityCalcService {
                 })
                 .collect(Collectors.toList());
 
-        if (patients.isEmpty()) return mapOf("num", 0, "denom", 0);
+        if (patients.isEmpty()) {
+            log.info("QUALITY_CALC indicator=en48hRate month={} allPatientCount={} eligiblePatientCount=0 source=live status=NO_ICU_PATIENT",
+                    monthKey, getInIcuPatients(monthKey, department).size());
+            return mapOf("num", 0, "denom", 0);
+        }
 
         List<String> mrns = patients.stream()
                 .map(p -> (String) p.get("mrn"))
@@ -577,10 +599,10 @@ public class QualityCalcService {
                 .distinct()
                 .collect(Collectors.toList());
 
+        // Combine both regex conditions into one to avoid duplicate key conflict
         Query orderQuery = new Query(Criteria.where("mrn").in(mrns)
                 .and("orderTime").lte(end)
-                .and("orderName").regex("流质饮食")
-                .and("orderName").regex("^((?!撤销).)*$"));
+                .and("orderName").regex("^(?!.*撤销).*流质饮食.*$"));
         List<Document> orders = dataCenterMongo.find(orderQuery, Document.class, CollectionConstants.VI_ICU_ZYYZ);
 
         // Group order times by mrn
@@ -631,6 +653,9 @@ public class QualityCalcService {
                 }
             }
         }
+
+        log.info("QUALITY_CALC indicator=en48hRate month={} enableDeptFilter={} eligiblePatientCount={} orderCandidateCount={} numerator={} denominator={} source=live status=ok",
+                monthKey, properties.isEnableDeptFilter(), patients.size(), orders.size(), num, patients.size());
 
         return mapOf("num", num, "denom", patients.size());
     }
@@ -696,6 +721,10 @@ public class QualityCalcService {
             if (dischargedType.contains("死亡")) death++;
             else success++;
         }
+
+        log.info("QUALITY_CALC indicator=rescueSuccessRate month={} rescueOrderCount={} mrnCount={} patientMatchCount={} success={} death={} terminal={} denom={} source=live status={}",
+                monthKey, rescueOrders.size(), mrns.size(), patients.size(), success, death, terminal, denom,
+                rescueOrders.isEmpty() ? "NO_ORDER_CANDIDATE" : "ok");
 
         return mapOf("num", success, "denom", denom, "death", death, "terminal", terminal,
                 "rescueCount", rescueOrders.size());
@@ -839,6 +868,11 @@ public class QualityCalcService {
 
         List<Document> denominatorDone = (List<Document>) denominatorMatched.get("done");
         if (denominatorDone.isEmpty()) {
+            String indicatorKey = denomKeyword.contains("休克") ? "shockRate" :
+                    denomKeyword.contains("ARDS") ? "ardsRate" :
+                            denomKeyword.contains("脑损伤") ? "acuteBrainInjuryRate" : "unknown";
+            log.info("QUALITY_CALC indicator={} denomKeyword={} numKeyword={} month={} patientCount={} denomMatchedCount=0 source=live status=NO_ORDER_CANDIDATE",
+                    indicatorKey, denomKeyword, numKeyword, monthKey, patients.size());
             return mapOf("num", 0, "denom", 0);
         }
 
@@ -846,6 +880,14 @@ public class QualityCalcService {
         Map<String, Object> numeratorMatched = getMatchedPatientsByOrderFilter(monthKey, denominatorDone, numFilter);
 
         List<Document> numeratorDone = (List<Document>) numeratorMatched.get("done");
+
+        String indicatorKey = denomKeyword.contains("休克") && numKeyword.contains("超声") ? "shockUltrasoundRate" :
+                denomKeyword.contains("休克") && numKeyword.contains("CVP") ? "shockHemodynamicRate" :
+                        denomKeyword.contains("ARDS") ? "ardsRate" :
+                                denomKeyword.contains("脑损伤") ? "acuteBrainInjuryRate" : "unknown";
+        log.info("QUALITY_CALC indicator={} month={} enableDeptFilter={} patientCount={} denomMatchedCount={} numerator={} denominator={} source=live status=ok",
+                indicatorKey, monthKey, properties.isEnableDeptFilter(), patients.size(), denominatorDone.size(), numeratorDone.size(), denominatorDone.size());
+
         return mapOf("num", numeratorDone.size(), "denom", denominatorDone.size());
     }
 
@@ -861,6 +903,13 @@ public class QualityCalcService {
 
         List<Document> done = (List<Document>) matched.get("done");
         List<Document> denominator = (List<Document>) matched.get("denominator");
+
+        String indicatorKey = keyword.contains("镇痛") ? "painRate" :
+                keyword.contains("镇静") ? "sedationRate" : "unknown";
+        log.info("QUALITY_CALC indicator={} month={} enableDeptFilter={} patientCount={} matchedPatientCount={} numerator={} denominator={} source=live status={}",
+                indicatorKey, monthKey, properties.isEnableDeptFilter(), patients.size(), denominator.size(), done.size(), denominator.size(),
+                denominator.isEmpty() ? "NO_ORDER_CANDIDATE" : "ok");
+
         return mapOf("num", done.size(), "denom", denominator.size());
     }
 
@@ -886,7 +935,7 @@ public class QualityCalcService {
      * Original JS: escapeReg(s)
      */
     private static String escapeRegex(String s) {
-        return s.replaceAll("([.*+?^${}()|[\\]\\\\])", "\\\\$1");
+        return s.replaceAll("([.\\\\*+?^${}()|\\[\\]])", "\\\\$1");
     }
 
     /**
