@@ -18,7 +18,6 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Override
     public void addViewControllers(ViewControllerRegistry registry) {
-        registry.addRedirectViewController("/", "/tongj/enteralNutrition");
         // Forward blood sugar routes to static index.html
         registry.addViewController("/tongj/bloodSugar").setViewName("forward:/tongj/bloodSugar/index.html");
         registry.addViewController("/tongj/bloodSugar/").setViewName("forward:/tongj/bloodSugar/index.html");
