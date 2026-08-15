@@ -1,165 +1,579 @@
+/* ============ CSS Variables ============ */
+:root {
+    --bs-page-bg: #f4f6fa;
+    --bs-panel-bg: #ffffff;
+    --bs-header-bg: #c9d6f3;
+    --bs-header-bg-deep: #bfcff0;
+    --bs-border: #aebfdf;
+    --bs-border-light: #c8d4e9;
+    --bs-row-bg: #ffffff;
+    --bs-row-alt-bg: #f8faff;
+    --bs-row-hover: #eaf0fc;
+    --bs-title: #26354a;
+    --bs-text: #27364a;
+    --bs-muted: #64748b;
+    --bs-primary: #315f9c;
+}
+
+/* ============ Reset ============ */
 * {
-    margin: 0;
-    padding: 0;
     box-sizing: border-box;
 }
 
+html,
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    background-color: #f5f7fa;
-    color: #333;
-    line-height: 1.6;
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
 }
 
-.container {
-    max-width: 100%;
-    padding: 16px;
+body {
+    color: var(--bs-text);
+    background: var(--bs-page-bg);
+    font-family:
+        "Microsoft YaHei UI",
+        "Microsoft YaHei",
+        "PingFang SC",
+        "Noto Sans CJK SC",
+        Arial,
+        sans-serif;
 }
 
-.header {
+[hidden] {
+    display: none !important;
+}
+
+/* ============ Page Layout ============ */
+.blood-sugar-page {
+    width: 100%;
+    min-width: 0;
+}
+
+.blood-sugar-report {
+    width: 100%;
+    padding: 10px 14px 16px;
+}
+
+.report-title {
+    margin: 2px 0 9px;
+    color: var(--bs-title);
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 28px;
+    text-align: center;
+    letter-spacing: .24em;
+}
+
+/* ============ Toolbar ============ */
+.blood-sugar-toolbar {
+    width: 100%;
+    min-height: 52px;
+    box-sizing: border-box;
     display: flex;
     align-items: center;
-    gap: 16px;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
+    gap: 12px;
+    margin: 0;
+    padding: 8px 12px;
+    background: #fff;
+    border-bottom: 1px solid #dfe3e8;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+    position: sticky;
+    top: 0;
+    z-index: 50;
 }
 
-.header h2 {
-    font-size: 18px;
-    font-weight: 600;
-    color: #1a1a1a;
+.range-tools {
+    display: inline-flex;
+    align-items: stretch;
+    flex: 0 0 auto;
+    gap: 0;
+    min-width: 0;
+}
+
+.nav-arrow {
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 0;
+    border: 1px solid #b8c5d8;
+    background: #fff;
+    color: #334155;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+}
+
+.nav-arrow-left {
+    border-radius: 5px 0 0 5px;
+}
+
+.nav-arrow-right {
+    border-radius: 0 5px 5px 0;
+}
+
+.nav-arrow:hover:not(:disabled) {
+    color: #1d4f91;
+    background: #f3f6fc;
+}
+
+.datetime-field {
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    border-top: 1px solid #b8c5d8;
+    border-bottom: 1px solid #b8c5d8;
+    background: #fff;
+}
+
+.datetime-label {
+    padding-left: 9px;
+    color: #4b5563;
+    font-size: 12px;
     white-space: nowrap;
 }
 
-.patient-info {
-    display: flex;
-    gap: 12px;
+.datetime-field input {
+    width: 168px;
+    height: 34px;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0 8px;
+    border: 0;
+    outline: 0;
+    color: #1f2937;
+    background: transparent;
+    font: inherit;
     font-size: 13px;
-    color: #666;
-    flex-wrap: wrap;
+    font-variant-numeric: tabular-nums;
 }
 
-.patient-info span {
+.range-separator {
+    height: 36px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 7px;
+    border-top: 1px solid #b8c5d8;
+    border-bottom: 1px solid #b8c5d8;
+    color: #64748b;
     background: #fff;
-    padding: 2px 8px;
-    border-radius: 4px;
-    border: 1px solid #e8e8e8;
+    font-size: 12px;
 }
 
-.toolbar {
-    margin-bottom: 12px;
-    display: flex;
-    gap: 8px;
+.toolbar-spacer {
+    flex: 1 1 auto;
+    min-width: 12px;
 }
 
-.btn {
-    padding: 6px 16px;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
+.range-status {
+    max-width: 360px;
+    overflow: hidden;
+    color: #64748b;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.toolbar-button {
+    height: 36px;
+    box-sizing: border-box;
+    padding: 0 16px;
+    border-radius: 5px;
     font-size: 13px;
-    transition: background-color 0.2s;
+    font-weight: 600;
+    cursor: pointer;
 }
 
-.btn-primary {
-    background-color: #1890ff;
+.primary-button {
+    border: 1px solid #315f9c;
     color: #fff;
+    background: #315f9c;
 }
 
-.btn-primary:hover {
-    background-color: #40a9ff;
+.primary-button:hover:not(:disabled) {
+    background: #244d84;
 }
 
-.btn-primary:disabled {
-    background-color: #d9d9d9;
+.secondary-button {
+    border: 1px solid #b8c5d8;
+    color: #334155;
+    background: #fff;
+}
+
+.secondary-button:hover:not(:disabled) {
+    background: #f3f6fc;
+}
+
+.nav-arrow:disabled,
+.toolbar-button:disabled,
+.datetime-field input:disabled {
+    opacity: .45;
     cursor: not-allowed;
 }
 
-.loading {
-    text-align: center;
-    padding: 40px;
-    color: #999;
-    font-size: 14px;
+/* ============ Patient Strip ============ */
+.patient-strip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px 18px;
+    min-height: 30px;
+    margin: 0 0 8px;
+    padding: 5px 10px;
+    border: 1px solid var(--bs-border-light);
+    color: #40516a;
+    background: #f4f7fd;
+    font-size: 12px;
+    flex-wrap: wrap;
 }
 
-.error {
-    text-align: center;
-    padding: 20px;
-    color: #ff4d4f;
-    background: #fff2f0;
-    border: 1px solid #ffccc7;
-    border-radius: 4px;
-    margin-bottom: 16px;
+.patient-strip strong {
+    color: #26354a;
+    font-weight: 500;
 }
 
-.empty {
+/* ============ Page States ============ */
+.page-state {
+    margin: 10px 0;
+    padding: 24px 16px;
+    border: 1px solid var(--bs-border-light);
     text-align: center;
-    padding: 40px;
-    color: #999;
-    font-size: 14px;
-}
-
-.table-wrapper {
-    overflow-x: auto;
+    font-size: 13px;
     background: #fff;
-    border-radius: 6px;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
-table {
+.loading-state {
+    color: #64748b;
+}
+
+.empty-state {
+    color: #64748b;
+}
+
+.error-state {
+    color: #a11f2d;
+    border-color: #e4a8ae;
+    background: #fff6f6;
+}
+
+/* ============ Table ============ */
+.table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--bs-border);
+    background: var(--bs-panel-bg);
+}
+
+.blood-sugar-table {
+    width: 100%;
+    min-width: 980px;
+    border-collapse: collapse;
+    table-layout: fixed;
+    color: var(--bs-text);
+    background: var(--bs-panel-bg);
+    font-size: 12px;
+}
+
+.blood-sugar-table th,
+.blood-sugar-table td {
+    height: 31px;
+    padding: 5px 8px;
+    border-right: 1px solid var(--bs-border);
+    border-bottom: 1px solid var(--bs-border);
+    line-height: 18px;
+    text-align: center;
+    vertical-align: middle;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.blood-sugar-table th:last-child,
+.blood-sugar-table td:last-child {
+    border-right: 0;
+}
+
+.blood-sugar-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.blood-sugar-table thead th {
+    height: 32px;
+    color: #26354a;
+    background: var(--bs-header-bg);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.blood-sugar-table tbody tr {
+    background: var(--bs-row-bg);
+}
+
+.blood-sugar-table tbody tr:nth-child(even) {
+    background: var(--bs-row-alt-bg);
+}
+
+.blood-sugar-table tbody tr:hover {
+    background: var(--bs-row-hover);
+}
+
+.blood-sugar-table tbody tr:hover td {
+    background: transparent;
+}
+
+/* Column widths */
+.blood-sugar-table th:nth-child(1),
+.blood-sugar-table td:nth-child(1) {
+    width: 54px;
+}
+
+.blood-sugar-table th:nth-child(2),
+.blood-sugar-table td:nth-child(2) {
+    width: 150px;
+}
+
+.blood-sugar-table th:nth-child(3),
+.blood-sugar-table td:nth-child(3) {
+    width: 125px;
+}
+
+.blood-sugar-table th:nth-child(4),
+.blood-sugar-table td:nth-child(4) {
+    width: 105px;
+}
+
+.blood-sugar-table th:nth-child(5),
+.blood-sugar-table td:nth-child(5) {
+    width: 125px;
+}
+
+.blood-sugar-table th:nth-child(6),
+.blood-sugar-table td:nth-child(6) {
+    width: 95px;
+}
+
+.blood-sugar-table th:nth-child(7),
+.blood-sugar-table td:nth-child(7) {
+    width: 95px;
+}
+
+.blood-sugar-table th:nth-child(8),
+.blood-sugar-table td:nth-child(8) {
+    width: 110px;
+}
+
+/* IRI value */
+.iri-value {
+    color: #234f88;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Clickable steroid factor */
+.clickable-factor {
+    color: #234f88;
+    text-decoration: underline;
+    text-decoration-color: #8ca6cf;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+.clickable-factor:hover {
+    color: #173c6f;
+    background: #e3ebfa;
+}
+
+.clickable-factor:focus-visible {
+    outline: 2px solid #315f9c;
+    outline-offset: -2px;
+}
+
+/* Detail button */
+.detail-link {
+    min-width: 62px;
+    height: 24px;
+    padding: 0 10px;
+    border: 1px solid #9eb2d3;
+    border-radius: 3px;
+    color: #315f9c;
+    background: #f7f9fe;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.detail-link:hover:not(:disabled) {
+    background: #e7eefb;
+}
+
+/* ============ Modal ============ */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, .45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+.modal-card {
+    width: 90%;
+    max-width: 720px;
+    max-height: 80vh;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .15);
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--bs-border-light);
+}
+
+.modal-header h2 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--bs-title);
+}
+
+.modal-close {
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    font-size: 20px;
+    color: #64748b;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+}
+
+.modal-close:hover {
+    background: #f1f5f9;
+}
+
+.modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 18px;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding: 12px 18px;
+    border-top: 1px solid var(--bs-border-light);
+}
+
+/* Detail table */
+.detail-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: 12px;
 }
 
-th {
-    background: #fafafa;
-    padding: 10px 12px;
-    text-align: left;
-    font-weight: 600;
-    color: #333;
-    border-bottom: 1px solid #f0f0f0;
+.detail-table th,
+.detail-table td {
+    height: 31px;
+    padding: 5px 8px;
+    border-right: 1px solid var(--bs-border);
+    border-bottom: 1px solid var(--bs-border);
+    text-align: center;
+    vertical-align: middle;
     white-space: nowrap;
 }
 
-td {
-    padding: 8px 12px;
-    border-bottom: 1px solid #f0f0f0;
-    vertical-align: top;
+.detail-table th:last-child,
+.detail-table td:last-child {
+    border-right: 0;
 }
 
-tr:hover td {
-    background: #f5f7fa;
+.detail-table tbody tr:last-child td {
+    border-bottom: 0;
 }
 
-.drug-detail {
-    font-size: 12px;
-    color: #666;
-    line-height: 1.8;
-}
-
-.drug-detail-item {
-    margin-bottom: 2px;
-}
-
-.iri-value {
+.detail-table thead th {
+    color: #26354a;
+    background: var(--bs-header-bg);
+    font-size: 11px;
     font-weight: 600;
-    color: #1890ff;
 }
 
-/* Responsive */
-@media (max-width: 768px) {
-    .header {
-        flex-direction: column;
+.detail-table tbody tr:nth-child(even) {
+    background: var(--bs-row-alt-bg);
+}
+
+/* ============ Responsive ============ */
+@media (max-width: 900px) {
+    .blood-sugar-toolbar {
         align-items: flex-start;
+        flex-wrap: wrap;
     }
 
-    .patient-info {
-        gap: 8px;
+    .range-tools {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: auto;
     }
 
-    th, td {
-        padding: 6px 8px;
-        font-size: 12px;
+    .toolbar-spacer {
+        display: none;
+    }
+
+    .range-status {
+        order: 3;
+        width: 100%;
+        max-width: none;
+    }
+
+    .patient-strip {
+        justify-content: flex-start;
+    }
+}
+
+/* ============ Print ============ */
+@media print {
+    .no-print,
+    .detail-link {
+        display: none !important;
+    }
+
+    body {
+        background: #fff;
+    }
+
+    .blood-sugar-report {
+        padding: 0;
+    }
+
+    .table-wrapper {
+        overflow: visible;
+        border-color: #000;
+    }
+
+    .blood-sugar-table {
+        min-width: 0;
+    }
+
+    .blood-sugar-table th,
+    .blood-sugar-table td {
+        border-color: #000;
     }
 }

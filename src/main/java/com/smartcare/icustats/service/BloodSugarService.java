@@ -3,6 +3,7 @@ package com.smartcare.icustats.service;
 import com.smartcare.icustats.config.CollectionConstants;
 import com.smartcare.icustats.dto.*;
 import com.smartcare.icustats.util.SteroidDoseUtils;
+import com.smartcare.icustats.util.ShanghaiTimeRangeUtils;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.slf4j.Logger;
@@ -14,19 +15,18 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.Date;
-import java.util.List;
-import java.util.TimeZone;
+import java.time.Instant;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 import java.util.regex.Pattern;
 
 @Service
 public class BloodSugarService {
 
     private static final Logger log = LoggerFactory.getLogger(BloodSugarService.class);
-    private static final String SHANGHAI_TZ = "Asia/Shanghai";
+    private static final Pattern STEROID_PATTERN = Pattern.compile("甲泼尼龙|氢化可的松|地塞米松");
+    private static final DateTimeFormatter DISPLAY_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     private final MongoTemplate smartCareMongoTemplate;
 
@@ -35,30 +35,47 @@ public class BloodSugarService {
     }
 
     /**
-     * Get blood sugar page data for a patient.
+     * Get blood sugar page data for a patient with optional time range.
      */
-    public BloodSugarPageData getPageData(String pid) {
+    public BloodSugarPageData getPageData(String pid, Instant startTime, Instant endTime) {
         // 1. Find patient
         PatientSummary patient = findPatient(pid);
         if (patient == null) {
             return null;
         }
 
-        // 2. Get patient's ICU stay period
-        Date[] stayPeriod = getIcuStayPeriod(pid);
-        Date startDate = stayPeriod[0];
-        Date endDate = stayPeriod[1];
+        // 2. Determine time range
+        BloodSugarTimeRange range;
+        if (startTime != null && endTime != null) {
+            range = ShanghaiTimeRangeUtils.requestedRange(startTime, endTime);
+        } else {
+            range = resolveDefaultRange(patient);
+        }
 
         // 3. Get blood sugar records
-        List<Document> bloodSugarRecords = queryBloodSugar(pid, startDate, endDate);
+        List<Document> bloodSugarRecords = queryBloodSugar(pid, range.getStartTime(), range.getEndTime());
 
-        // 4. Build rows with IRI calculation
-        List<BloodSugarRow> rows = buildRows(pid, bloodSugarRecords);
+        // 4. Batch query steroids for all 8-8 windows
+        Map<String, List<SteroidDrugDetail>> steroidCache = batchQuerySteroids(pid, bloodSugarRecords);
+
+        // 5. Build rows with IRI calculation
+        List<BloodSugarRow> rows = buildRows(bloodSugarRecords, steroidCache);
 
         BloodSugarPageData data = new BloodSugarPageData();
         data.setPatient(patient);
+        data.setRange(range);
         data.setRows(rows);
         return data;
+    }
+
+    /**
+     * Resolve default range based on patient status.
+     */
+    private BloodSugarTimeRange resolveDefaultRange(PatientSummary patient) {
+        if (patient.isDischarged() && patient.getAdmissionTime() != null && patient.getDischargeTime() != null) {
+            return ShanghaiTimeRangeUtils.dischargedRange(patient.getAdmissionTime(), patient.getDischargeTime());
+        }
+        return ShanghaiTimeRangeUtils.currentNursingRange(Instant.now());
     }
 
     /**
@@ -67,7 +84,6 @@ public class BloodSugarService {
     private PatientSummary findPatient(String pid) {
         Query query = new Query();
 
-        // Try to parse as ObjectId
         try {
             query.addCriteria(new Criteria().orOperator(
                     Criteria.where("_id").is(new ObjectId(pid)),
@@ -75,7 +91,6 @@ public class BloodSugarService {
                     Criteria.where("pid").is(pid)
             ));
         } catch (IllegalArgumentException e) {
-            // Not a valid ObjectId, search by pid field only
             query.addCriteria(new Criteria().orOperator(
                     Criteria.where("_id").is(pid),
                     Criteria.where("pid").is(pid)
@@ -94,96 +109,194 @@ public class BloodSugarService {
         summary.setBedNo(getStringField(patient, "bedNo"));
         summary.setGender(getStringField(patient, "sex"));
         summary.setAge(getStringField(patient, "age"));
+
+        // Parse admission/discharge times
+        summary.setAdmissionTime(getInstantField(patient, "admissionTime", "inTime", "inIcuTime", "icuInTime", "enterTime"));
+        summary.setDischargeTime(getInstantField(patient, "dischargeTime", "outTime", "outIcuTime", "icuOutTime", "leaveTime"));
+        summary.setDischarged(isDischarged(patient));
+
         return summary;
     }
 
     /**
-     * Get ICU stay period for a patient.
-     * Returns [startDate, endDate] - from 7 days before admission to now.
+     * Get Instant from first available field.
      */
-    private Date[] getIcuStayPeriod(String pid) {
-        // Find the patient's latest admission
-        Query patientQuery = new Query();
-        try {
-            patientQuery.addCriteria(new Criteria().orOperator(
-                    Criteria.where("_id").is(new ObjectId(pid)),
-                    Criteria.where("_id").is(pid),
-                    Criteria.where("pid").is(pid)
-            ));
-        } catch (IllegalArgumentException e) {
-            patientQuery.addCriteria(new Criteria().orOperator(
-                    Criteria.where("_id").is(pid),
-                    Criteria.where("pid").is(pid)
-            ));
-        }
-
-        Document patient = smartCareMongoTemplate.findOne(patientQuery, Document.class, CollectionConstants.PATIENT);
-
-        Date now = new Date();
-        Date startDate = null;
-        Date endDate = now;
-
-        if (patient != null) {
-            // Try to get admission time
-            Object inIcuTime = patient.get("inIcuTime");
-            if (inIcuTime instanceof Date) {
-                startDate = (Date) inIcuTime;
+    private Instant getInstantField(Document doc, String... fieldNames) {
+        for (String field : fieldNames) {
+            Object value = doc.get(field);
+            if (value instanceof Date) {
+                return ((Date) value).toInstant();
             }
         }
-
-        // Default: 7 days ago
-        if (startDate == null) {
-            startDate = new Date(now.getTime() - 7L * 24 * 60 * 60 * 1000);
-        }
-
-        return new Date[]{startDate, endDate};
+        return null;
     }
 
     /**
-     * Query blood sugar records for a patient within a time range.
+     * Check if patient is discharged.
      */
-    private List<Document> queryBloodSugar(String pid, Date startDate, Date endDate) {
+    private boolean isDischarged(Document patient) {
+        // Check discharge time exists
+        Instant dischargeTime = getInstantField(patient, "dischargeTime", "outTime", "outIcuTime", "icuOutTime", "leaveTime");
+        if (dischargeTime != null) return true;
+
+        // Check status field
+        String[] statusFields = {"status", "patientStatus"};
+        String[] dischargedValues = {"discharged", "已出科", "出科", "转出", "已转出"};
+
+        for (String field : statusFields) {
+            Object status = patient.get(field);
+            if (status != null) {
+                String statusStr = String.valueOf(status).trim().toLowerCase();
+                for (String dv : dischargedValues) {
+                    if (statusStr.equals(dv.toLowerCase())) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Query blood sugar records within time range.
+     */
+    private List<Document> queryBloodSugar(String pid, Instant startDate, Instant endDate) {
         Query query = new Query();
         query.addCriteria(Criteria.where("pid").is(pid));
         query.addCriteria(Criteria.where("valid").in(true, 1, "true"));
-        if (startDate != null) {
-            query.addCriteria(Criteria.where("time").gte(startDate));
-        }
-        if (endDate != null) {
-            query.addCriteria(Criteria.where("time").lt(endDate));
-        }
-        query.with(org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.ASC, "time"));
+        query.addCriteria(Criteria.where("time").gte(Date.from(startDate)).lt(Date.from(endDate)));
+        query.with(org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.ASC, "time", "_id"));
 
         return smartCareMongoTemplate.find(query, Document.class, CollectionConstants.BLOOD_SUGAR);
     }
 
     /**
+     * Batch query steroids for all 8-8 windows in blood sugar records.
+     * Returns map of windowKey -> drug details.
+     */
+    private Map<String, List<SteroidDrugDetail>> batchQuerySteroids(String pid, List<Document> bloodSugarRecords) {
+        if (bloodSugarRecords.isEmpty()) return Collections.emptyMap();
+
+        // Find min/max time to determine query range
+        Date minTime = getDateField(bloodSugarRecords.get(0), "time");
+        Date maxTime = getDateField(bloodSugarRecords.get(bloodSugarRecords.size() - 1), "time");
+
+        if (minTime == null || maxTime == null) return Collections.emptyMap();
+
+        // Expand range to cover all possible 8-8 windows
+        // minTime - 24h to maxTime + 24h covers all windows
+        Date queryStart = new Date(minTime.getTime() - 24L * 60 * 60 * 1000);
+        Date queryEnd = new Date(maxTime.getTime() + 24L * 60 * 60 * 1000);
+
+        // Single batch query for all steroids
+        Query query = new Query();
+        query.addCriteria(Criteria.where("pid").is(pid));
+        query.addCriteria(Criteria.where("startTime").gte(queryStart).lt(queryEnd));
+        query.addCriteria(Criteria.where("name").regex(STEROID_PATTERN));
+        query.addCriteria(Criteria.where("status").nin("invalid", "cancel", "cancelled", "revoke", "revoked", 99, -1));
+        query.with(org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.ASC, "startTime"));
+
+        List<Document> drugs = smartCareMongoTemplate.find(query, Document.class, CollectionConstants.DRUG_EXE);
+
+        // Group drugs by 8-8 window
+        Map<String, List<SteroidDrugDetail>> windowMap = new HashMap<>();
+        for (Document drug : drugs) {
+            Date drugTime = getDateField(drug, "startTime");
+            if (drugTime == null) continue;
+
+            String windowKey = getWindowKey(drugTime);
+            SteroidDrugDetail detail = buildDrugDetail(drug);
+            windowMap.computeIfAbsent(windowKey, k -> new ArrayList<>()).add(detail);
+        }
+
+        return windowMap;
+    }
+
+    /**
+     * Get window key for a time point (YYYY-MM-DD of the nursing day).
+     */
+    private String getWindowKey(Date time) {
+        Date[] window = get8_8Window(time);
+        ZonedDateTime windowStart = window[0].toInstant().atZone(ShanghaiTimeRangeUtils.SHANGHAI_ZONE);
+        return windowStart.toLocalDate().toString();
+    }
+
+    /**
+     * Build drug detail from document.
+     */
+    private SteroidDrugDetail buildDrugDetail(Document drug) {
+        SteroidDrugDetail detail = new SteroidDrugDetail();
+        Date startTime = getDateField(drug, "startTime");
+        detail.setTime(startTime != null ? formatShanghai(startTime) : "");
+        detail.setName(getStringField(drug, "name"));
+
+        // Parse dose from dose field or drugList
+        BigDecimal dose = SteroidDoseUtils.safeParseBigDecimal(drug.get("dose"));
+        String unit = getStringField(drug, "unit");
+
+        // Try drugList array format
+        if (dose == null && drug.get("drugList") instanceof List) {
+            List<?> drugList = (List<?>) drug.get("drugList");
+            for (Object item : drugList) {
+                if (item instanceof Document) {
+                    Document drugItem = (Document) item;
+                    String name = getStringField(drugItem, "name");
+                    if (SteroidDoseUtils.isTargetSteroid(name)) {
+                        dose = SteroidDoseUtils.safeParseBigDecimal(drugItem.get("dose"));
+                        unit = getStringField(drugItem, "unit");
+                        detail.setName(name);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Try drugList object format
+        if (dose == null && drug.get("drugList") instanceof Document) {
+            Document drugList = (Document) drug.get("drugList");
+            dose = SteroidDoseUtils.safeParseBigDecimal(drugList.get("dose"));
+            unit = getStringField(drugList, "unit");
+        }
+
+        detail.setDose(dose);
+        detail.setUnit(unit);
+
+        // Calculate hydrocortisone equivalent
+        BigDecimal doseMg = SteroidDoseUtils.convertToMg(dose, unit);
+        BigDecimal equivalent = SteroidDoseUtils.toHydrocortisoneEquivalent(doseMg, detail.getName());
+        detail.setHydrocortisoneEquivalent(equivalent);
+
+        return detail;
+    }
+
+    /**
      * Build blood sugar rows with IRI calculation.
      */
-    private List<BloodSugarRow> buildRows(String pid, List<Document> bloodSugarRecords) {
+    private List<BloodSugarRow> buildRows(List<Document> bloodSugarRecords, Map<String, List<SteroidDrugDetail>> steroidCache) {
         List<BloodSugarRow> rows = new ArrayList<>();
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm");
-        sdf.setTimeZone(TimeZone.getTimeZone(SHANGHAI_TZ));
 
         for (Document record : bloodSugarRecords) {
             BloodSugarRow row = new BloodSugarRow();
             row.setId(getIdString(record));
             Date time = getDateField(record, "time");
-            row.setTime(time != null ? sdf.format(time) : "");
+            row.setTime(time != null ? formatShanghai(time) : "");
             row.setResult(SteroidDoseUtils.safeParseBigDecimal(record.get("result")));
             row.setResultDisplay(getStringField(record, "result"));
             row.setInsulin(SteroidDoseUtils.safeParseInsulin(record.get("insulin")));
 
-            // Get patient's steroid factor
-            BigDecimal steroidFactor = getPatientSteroidFactor(pid, time);
+            // Get steroid factor from cache
+            String windowKey = time != null ? getWindowKey(time) : "";
+            List<SteroidDrugDetail> drugDetails = steroidCache.getOrDefault(windowKey, Collections.emptyList());
+
+            BigDecimal steroidFactor = BigDecimal.ZERO;
+            for (SteroidDrugDetail drug : drugDetails) {
+                if (drug.getHydrocortisoneEquivalent() != null) {
+                    steroidFactor = steroidFactor.add(drug.getHydrocortisoneEquivalent());
+                }
+            }
+
             row.setSteroidFactor(steroidFactor);
             row.setCorrectionFactor(SteroidDoseUtils.getCorrectionFactor(steroidFactor));
-
-            // Calculate IRI
             row.setIri(SteroidDoseUtils.calculateIri(row.getResult(), row.getInsulin(), row.getCorrectionFactor()));
-
-            // Get drug details for this window
-            row.setDrugDetails(getSteroidDrugDetails(pid, time));
+            row.setDrugDetails(drugDetails);
 
             rows.add(row);
         }
@@ -191,128 +304,26 @@ public class BloodSugarService {
     }
 
     /**
-     * Get patient's steroid factor for a specific time point.
-     */
-    private BigDecimal getPatientSteroidFactor(String pid, Date time) {
-        if (time == null) return BigDecimal.ZERO;
-
-        // Get the 8-8 window for this time point
-        Date[] window = get8_8Window(time);
-        Date windowStart = window[0];
-        Date windowEnd = window[1];
-
-        // Query drugExe for steroids in this window
-        BigDecimal totalEquivalent = getTotalSteroidEquivalent(pid, windowStart, windowEnd);
-        return totalEquivalent;
-    }
-
-    /**
-     * Get steroid drug details for a specific time point.
-     */
-    private List<SteroidDrugDetail> getSteroidDrugDetails(String pid, Date time) {
-        if (time == null) return new ArrayList<>();
-
-        Date[] window = get8_8Window(time);
-        Date windowStart = window[0];
-        Date windowEnd = window[1];
-
-        return querySteroidDrugs(pid, windowStart, windowEnd);
-    }
-
-    /**
-     * Get total steroid equivalent for a patient in a time window.
-     */
-    private BigDecimal getTotalSteroidEquivalent(String pid, Date windowStart, Date windowEnd) {
-        List<SteroidDrugDetail> drugs = querySteroidDrugs(pid, windowStart, windowEnd);
-        BigDecimal total = BigDecimal.ZERO;
-        for (SteroidDrugDetail drug : drugs) {
-            if (drug.getHydrocortisoneEquivalent() != null) {
-                total = total.add(drug.getHydrocortisoneEquivalent());
-            }
-        }
-        return total;
-    }
-
-    /**
-     * Query steroid drugs for a patient in a time window.
-     */
-    private List<SteroidDrugDetail> querySteroidDrugs(String pid, Date windowStart, Date windowEnd) {
-        // Build drug name regex for target steroids
-        Pattern drugPattern = Pattern.compile("甲泼尼龙|氢化可的松|地塞米松");
-
-        Query query = new Query();
-        query.addCriteria(Criteria.where("pid").is(pid));
-        query.addCriteria(Criteria.where("startTime").gte(windowStart).lt(windowEnd));
-        query.addCriteria(Criteria.where("name").regex(drugPattern));
-        // Exclude invalid/cancelled/revoke
-        query.addCriteria(Criteria.where("status").nin("invalid", "cancel", "cancelled", "revoke", "revoked", 99, -1));
-        query.with(org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.ASC, "startTime"));
-
-        List<Document> drugs = smartCareMongoTemplate.find(query, Document.class, CollectionConstants.DRUG_EXE);
-
-        List<SteroidDrugDetail> details = new ArrayList<>();
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm");
-        sdf.setTimeZone(TimeZone.getTimeZone(SHANGHAI_TZ));
-
-        for (Document drug : drugs) {
-            SteroidDrugDetail detail = new SteroidDrugDetail();
-            Date startTime = getDateField(drug, "startTime");
-            detail.setTime(startTime != null ? sdf.format(startTime) : "");
-            detail.setName(getStringField(drug, "name"));
-            detail.setDose(SteroidDoseUtils.safeParseBigDecimal(drug.get("dose")));
-            detail.setUnit(getStringField(drug, "unit"));
-
-            // Calculate hydrocortisone equivalent
-            BigDecimal doseMg = SteroidDoseUtils.convertToMg(detail.getDose(), detail.getUnit());
-            BigDecimal equivalent = SteroidDoseUtils.toHydrocortisoneEquivalent(doseMg, detail.getName());
-            detail.setHydrocortisoneEquivalent(equivalent);
-
-            details.add(detail);
-        }
-        return details;
-    }
-
-    /**
-     * Get 8-8 window for a natural day D.
-     * Window = [D 08:00:00 Shanghai, D+1 08:00:00 Shanghai)
-     * If time < D 08:00, window is [D-1 08:00, D 08:00)
-     * If time >= D 08:00, window is [D 08:00, D+1 08:00)
+     * Get 8-8 window for a time point.
      */
     public static Date[] get8_8Window(Date time) {
-        if (time == null) {
-            return new Date[]{null, null};
-        }
+        if (time == null) return new Date[]{null, null};
 
-        TimeZone shanghaiTz = TimeZone.getTimeZone(SHANGHAI_TZ);
-        Calendar cal = Calendar.getInstance(shanghaiTz);
-        cal.setTime(time);
+        ZonedDateTime zdt = time.toInstant().atZone(ShanghaiTimeRangeUtils.SHANGHAI_ZONE);
+        int hour = zdt.getHour();
 
-        int hour = cal.get(Calendar.HOUR_OF_DAY);
-
-        // Set to 08:00:00 of the current day
-        cal.set(Calendar.HOUR_OF_DAY, 8);
-        cal.set(Calendar.MINUTE, 0);
-        cal.set(Calendar.SECOND, 0);
-        cal.set(Calendar.MILLISECOND, 0);
-        Date today8am = cal.getTime();
-
-        Date windowStart;
-        Date windowEnd;
+        ZonedDateTime windowStart;
+        ZonedDateTime windowEnd;
 
         if (hour >= 8) {
-            // time >= today 08:00 → window is [today 08:00, tomorrow 08:00)
-            windowStart = today8am;
-            cal.add(Calendar.DAY_OF_MONTH, 1);
-            windowEnd = cal.getTime();
+            windowStart = zdt.toLocalDate().atTime(8, 0).atZone(ShanghaiTimeRangeUtils.SHANGHAI_ZONE);
+            windowEnd = zdt.toLocalDate().plusDays(1).atTime(8, 0).atZone(ShanghaiTimeRangeUtils.SHANGHAI_ZONE);
         } else {
-            // time < today 08:00 → window is [yesterday 08:00, today 08:00)
-            cal.add(Calendar.DAY_OF_MONTH, -1);
-            windowStart = cal.getTime();
-            cal.add(Calendar.DAY_OF_MONTH, 1);
-            windowEnd = cal.getTime();
+            windowStart = zdt.toLocalDate().minusDays(1).atTime(8, 0).atZone(ShanghaiTimeRangeUtils.SHANGHAI_ZONE);
+            windowEnd = zdt.toLocalDate().atTime(8, 0).atZone(ShanghaiTimeRangeUtils.SHANGHAI_ZONE);
         }
 
-        return new Date[]{windowStart, windowEnd};
+        return new Date[]{Date.from(windowStart.toInstant()), Date.from(windowEnd.toInstant())};
     }
 
     // Helper methods
@@ -336,5 +347,9 @@ public class BloodSugarService {
             return (Date) value;
         }
         return null;
+    }
+
+    private String formatShanghai(Date date) {
+        return date.toInstant().atZone(ShanghaiTimeRangeUtils.SHANGHAI_ZONE).format(DISPLAY_FORMATTER);
     }
 }

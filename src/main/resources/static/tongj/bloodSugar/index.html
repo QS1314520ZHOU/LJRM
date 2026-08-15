@@ -7,41 +7,97 @@
     <link rel="stylesheet" href="blood-sugar.css">
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h2>血糖 IRI 统计</h2>
-            <div id="patientInfo" class="patient-info" style="display:none;">
-                <span id="patientName"></span>
-                <span id="patientMrn"></span>
-                <span id="patientBed"></span>
-                <span id="patientGender"></span>
-                <span id="patientAge"></span>
-            </div>
-        </div>
+    <main id="bloodSugarPage" class="blood-sugar-page">
+        <header class="blood-sugar-toolbar no-print" aria-label="血糖统计时间工具栏">
+            <div class="range-tools" role="group" aria-label="血糖统计时间范围">
+                <button id="btnPreviousRange" type="button" class="nav-arrow nav-arrow-left" aria-label="前一天" title="前一天">‹</button>
 
-        <div id="loading" class="loading" style="display:none;">加载中...</div>
-        <div id="error" class="error" style="display:none;"></div>
-        <div id="empty" class="empty" style="display:none;">暂无血糖数据</div>
+                <label class="datetime-field">
+                    <span class="datetime-label">开始时间</span>
+                    <input id="startTime" type="datetime-local" step="60" aria-label="开始时间">
+                </label>
 
-        <div id="content" style="display:none;">
-            <div class="toolbar">
-                <button id="btnExport" class="btn btn-primary">导出 Excel</button>
+                <span class="range-separator" aria-hidden="true">至</span>
+
+                <label class="datetime-field">
+                    <span class="datetime-label">结束时间</span>
+                    <input id="endTime" type="datetime-local" step="60" aria-label="结束时间">
+                </label>
+
+                <button id="btnNextRange" type="button" class="nav-arrow nav-arrow-right" aria-label="后一天" title="后一天">›</button>
             </div>
-            <div class="table-wrapper">
-                <table id="dataTable">
+
+            <div class="toolbar-spacer"></div>
+
+            <div id="rangeStatus" class="range-status" role="status">等待患者信息</div>
+
+            <button id="btnRefresh" type="button" class="toolbar-button secondary-button">刷新</button>
+
+            <button id="btnExport" type="button" class="toolbar-button primary-button" disabled>导出 Excel</button>
+        </header>
+
+        <section class="blood-sugar-report">
+            <h1 class="report-title">血糖 IRI 统计</h1>
+
+            <div id="patientInfo" class="patient-strip" hidden>
+                <span>床号：<strong id="patientBed"></strong></span>
+                <span>姓名：<strong id="patientName"></strong></span>
+                <span>病案号：<strong id="patientMrn"></strong></span>
+                <span>性别：<strong id="patientGender"></strong></span>
+                <span>年龄：<strong id="patientAge"></strong></span>
+                <span>入科时间：<strong id="patientAdmissionTime"></strong></span>
+                <span>出科时间：<strong id="patientDischargeTime"></strong></span>
+                <span>状态：<strong id="patientStatus"></strong></span>
+            </div>
+
+            <div id="loading" class="page-state loading-state" role="status" hidden>正在加载血糖数据……</div>
+            <div id="error" class="page-state error-state" role="alert" hidden></div>
+            <div id="empty" class="page-state empty-state" role="status" hidden>当前时间范围暂无血糖数据</div>
+
+            <div id="tableContainer" class="table-wrapper" hidden>
+                <table id="dataTable" class="blood-sugar-table">
                     <thead>
                         <tr>
-                            <th>时间</th>
-                            <th>血糖 (mmol/L)</th>
-                            <th>胰岛素 (U)</th>
-                            <th>激素当量 (mg)</th>
-                            <th>校正因子</th>
-                            <th>IRI</th>
-                            <th>激素详情</th>
+                            <th scope="col">序号</th>
+                            <th scope="col">血糖时间</th>
+                            <th scope="col">血糖（mmol/L）</th>
+                            <th scope="col">胰岛素（U）</th>
+                            <th scope="col">激素当量（mg）</th>
+                            <th scope="col">校正因子</th>
+                            <th scope="col">IRI</th>
+                            <th scope="col">激素详情</th>
                         </tr>
                     </thead>
                     <tbody id="tableBody"></tbody>
                 </table>
+            </div>
+        </section>
+    </main>
+
+    <div id="steroidDialog" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="steroidDialogTitle" hidden>
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2 id="steroidDialogTitle">激素使用详情</h2>
+                <button id="btnCloseSteroidDialog" type="button" class="modal-close" aria-label="关闭">×</button>
+            </div>
+
+            <div class="modal-body">
+                <table class="detail-table">
+                    <thead>
+                        <tr>
+                            <th>用药时间</th>
+                            <th>药物名称</th>
+                            <th>原始剂量</th>
+                            <th>原始单位</th>
+                            <th>氢化可的松等效剂量（mg）</th>
+                        </tr>
+                    </thead>
+                    <tbody id="steroidDetailBody"></tbody>
+                </table>
+            </div>
+
+            <div class="modal-footer">
+                <button id="btnConfirmSteroidDialog" type="button" class="toolbar-button primary-button">确定</button>
             </div>
         </div>
     </div>
