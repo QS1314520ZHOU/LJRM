@@ -1678,7 +1678,7 @@ public class QualityService {
                 Map.of("key", "index", "title", "序号"),
                 Map.of("key", "item", "title", "指标"),
                 Map.of("key", "value", "title", "数值"),
-                Map.of("key", "action", "title", "操作"));
+                Map.of("key", "action", "title", "操作", "type", "action"));
     }
 
     private Map<String, Object> makeSummaryRow(int index, Object item, Object value, Object action) {

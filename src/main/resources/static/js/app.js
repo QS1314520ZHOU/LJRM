@@ -305,7 +305,7 @@ async function queryQuality(query) {
 }
 
 function renderDrgTable(months, data) {
-  statsTable.classList.remove('is-quality');
+  statsTable.classList.remove('is-quality', 'is-nutrition-quality');
   statsTable.classList.add('is-drg');
 
   els.tableHead.innerHTML = `
@@ -345,7 +345,7 @@ function renderDrgTable(months, data) {
 }
 
 function renderQualityTable(indicators) {
-  statsTable.classList.remove('is-drg');
+  statsTable.classList.remove('is-drg', 'is-nutrition-quality');
   statsTable.classList.add('is-quality');
   const months = lastQualityResult?.months || [];
 
@@ -715,7 +715,7 @@ async function queryNutrition({ url, title, query }) {
 }
 
 function renderNutritionTable(months, data) {
-  statsTable.classList.remove('is-quality');
+  statsTable.classList.remove('is-quality', 'is-nutrition-quality');
   statsTable.classList.add('is-drg');
 
   els.tableHead.innerHTML = `
@@ -1517,7 +1517,7 @@ async function queryNutritionQuality({ url, title, query }) {
 }
 
 function renderNutritionQualityTable(data) {
-  statsTable.classList.remove('is-quality');
+  statsTable.classList.remove('is-quality', 'is-drg');
   statsTable.classList.add('is-nutrition-quality');
 
   const months = data?.months || [];
