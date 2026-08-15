@@ -30,14 +30,42 @@ icu-stats:
   quality-rebuild-dept-code: ${QUALITY_REBUILD_DEPT_CODE:0211}
   quality-rebuild-department: ${QUALITY_REBUILD_DEPARTMENT:重症医学科}
   quality-rebuild-dry-run: ${QUALITY_REBUILD_DRY_RUN:true}
+  # ═══════════════════════════════════════════════════════════════
+  # 营养质量控制指标监测配置
+  # ═══════════════════════════════════════════════════════════════
+  # 必须配置: NUTRITION_QUALITY_COLLECTION
+  #   设置为 SmartCare 数据库中的营养质控集合名称
+  #   例如: PatCnyyRestraintLjrmyy
+  #
+  # 配置方式一: 环境变量 (推荐)
+  #   export NUTRITION_QUALITY_COLLECTION=PatCnyyRestraintLjrmyy
+  #
+  # 配置方式二: 修改下方默认值
+  #   collection: PatCnyyRestraintLjrmyy
+  #
+  # 配置方式三: 启动参数
+  #   java -jar xxx.jar --NUTRITION_QUALITY_COLLECTION=PatCnyyRestraintLjrmyy
+  #
+  # 自动发现: 如果不知道集合名，可设置 auto-discover-collection=true
+  #   程序会根据 class-pattern 自动搜索集合 (性能较差，不推荐生产使用)
+  # ═══════════════════════════════════════════════════════════════
   nutrition-quality:
     enabled: ${NUTRITION_QUALITY_ENABLED:true}
-    collection: ${NUTRITION_QUALITY_COLLECTION:}
+    # 必填: 营养质控数据集合名称 (SmartCare 数据库)
+    collection: ${NUTRITION_QUALITY_COLLECTION:PatCnyyRestraintLjrmyy}
     timezone: ${NUTRITION_QUALITY_TIMEZONE:Asia/Shanghai}
+    # valid字段的有效值 (字符串 "valid"，不是布尔值)
     valid-value: ${NUTRITION_QUALITY_VALID_VALUE:valid}
     default-dept-code: ${NUTRITION_QUALITY_DEPT_CODE:0211}
+    # 自动发现集合时使用的 _class 模式匹配
     class-pattern: ${NUTRITION_QUALITY_CLASS_PATTERN:PatCnyyRestraintLjrmyy}
+    # 自动发现集合 (性能较差，仅在不知道集合名时使用)
     auto-discover-collection: ${NUTRITION_QUALITY_AUTO_DISCOVER_COLLECTION:false}
+    # ═══════════════════════════════════════════════════════════
+    # MongoDB 字段映射
+    # 左侧为程序内部字段名，右侧为 MongoDB 文档中的实际字段名
+    # 如果字段名不同，修改右侧值即可
+    # ═══════════════════════════════════════════════════════════
     fields:
       pid: ${NUTRITION_QUALITY_FIELD_PID:pid}
       record-time: ${NUTRITION_QUALITY_FIELD_TIME:startTime}
