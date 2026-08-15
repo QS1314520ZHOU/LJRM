@@ -4,6 +4,7 @@ const els = {
   btnTabQuality: document.getElementById('btnTabQuality'),
   btnTabDrg: document.getElementById('btnTabDrg'),
   btnTabNutrition: document.getElementById('btnTabNutrition'),
+  btnTabNutritionQuality: document.getElementById('btnTabNutritionQuality'),
   year: document.getElementById('year'),
   department: document.getElementById('department'),
   startMonth: document.getElementById('startMonth'),
@@ -47,6 +48,9 @@ let lastNutritionResult = null;
 let lastNutritionQuery = null;
 let lastNutritionStatus = { text: '请选择条件后查询', isError: false };
 let lastDailyResult = null;
+let lastNutritionQualityResult = null;
+let lastNutritionQualityQuery = null;
+let lastNutritionQualityStatus = { text: '请选择条件后查询', isError: false };
 let lastDetail = null;
 let lastDetailMeta = null;
 let detailHistory = [];   // 详情弹窗的层级栈，[{ openArgs, detail, meta, title, status }, ...]
@@ -107,6 +111,7 @@ document.body.appendChild(qualityTooltipEl);
 els.btnTabQuality.addEventListener('click', () => switchView('quality'));
 els.btnTabDrg.addEventListener('click', () => switchView('drg'));
 els.btnTabNutrition?.addEventListener('click', () => switchView('nutrition'));
+els.btnTabNutritionQuality?.addEventListener('click', () => switchView('nutritionQuality'));
 els.btnYearQuery.addEventListener('click', () => handleQuery('year'));
 els.btnRangeQuery.addEventListener('click', () => handleQuery('range'));
 els.btnExport.addEventListener('click', exportCurrentTable);
@@ -158,6 +163,15 @@ async function handleQuery(mode) {
       return;
     }
 
+    if (activeView === 'nutritionQuality') {
+      await queryNutritionQuality({
+        url: `${API_BASE}/nutrition/quality/year?year=${encodeURIComponent(year)}&department=${encodeURIComponent(department)}`,
+        title: `年度统计：${year}年`,
+        query: { mode, year, department, startMonth: `${year}-01`, endMonth: `${year}-12` },
+      });
+      return;
+    }
+
     await queryDrg({
       url: `${API_BASE}/year?year=${encodeURIComponent(year)}&department=${encodeURIComponent(department)}`,
       title: `年度统计：${year}年`,
@@ -185,6 +199,15 @@ async function handleQuery(mode) {
   if (activeView === 'nutrition') {
     await queryNutrition({
       url: `${API_BASE}/nutrition/range?startMonth=${encodeURIComponent(startMonth)}&endMonth=${encodeURIComponent(endMonth)}&department=${encodeURIComponent(department)}`,
+      title: `月份统计：${startMonth} 至 ${endMonth}`,
+      query: { mode, startMonth, endMonth, department },
+    });
+    return;
+  }
+
+  if (activeView === 'nutritionQuality') {
+    await queryNutritionQuality({
+      url: `${API_BASE}/nutrition/quality/range?startMonth=${encodeURIComponent(startMonth)}&endMonth=${encodeURIComponent(endMonth)}&department=${encodeURIComponent(department)}`,
       title: `月份统计：${startMonth} 至 ${endMonth}`,
       query: { mode, startMonth, endMonth, department },
     });
@@ -986,6 +1009,11 @@ function exportCurrentTable() {
     return;
   }
 
+  if (activeView === 'nutritionQuality') {
+    exportNutritionQualitySummary();
+    return;
+  }
+
   if (activeView === 'quality') {
     if (!lastQualityResult?.indicators?.length) return;
     exportSummaryXlsx({
@@ -1330,6 +1358,7 @@ function switchView(view) {
   els.btnTabQuality.classList.toggle('active', view === 'quality');
   els.btnTabDrg.classList.toggle('active', view === 'drg');
   els.btnTabNutrition?.classList.toggle('active', view === 'nutrition');
+  els.btnTabNutritionQuality?.classList.toggle('active', view === 'nutritionQuality');
 
   // 每日子模块仅在营养统计视图显示
   if (els.dailySection) els.dailySection.style.display = view === 'nutrition' ? '' : 'none';
@@ -1351,6 +1380,18 @@ function switchView(view) {
       renderNutritionTable(lastNutritionResult.months, lastNutritionResult.data);
       els.btnExport.disabled = false;
       setStatus(lastNutritionStatus.text, lastNutritionStatus.isError);
+      return;
+    }
+
+    void handleQuery('range');
+    return;
+  }
+
+  if (view === 'nutritionQuality') {
+    if (lastNutritionQualityResult?.indicators?.length) {
+      renderNutritionQualityTable(lastNutritionQualityResult);
+      els.btnExport.disabled = false;
+      setStatus(lastNutritionQualityStatus.text, lastNutritionQualityStatus.isError);
       return;
     }
 
@@ -1390,6 +1431,372 @@ function formatMonthLabel(monthValue) {
   const [year, month] = String(monthValue).split('-');
   if (!year || !month) return monthValue;
   return `${year}年${Number(month)}月`;
+}
+
+// ── 营养质量控制指标监测 ──────────────────────────────
+
+const NUTRITION_QUALITY_DETAIL_COLUMNS = [
+  { key: 'index', title: '序号' },
+  { key: 'recordTime', title: '评估时间' },
+  { key: 'statMonth', title: '统计月份' },
+  { key: 'department', title: '科室' },
+  { key: 'deptCode', title: '科室代码' },
+  { key: 'bedNo', title: '床号' },
+  { key: 'name', title: '姓名' },
+  { key: 'hospitalNo', title: '病历号' },
+  { key: 'patientIdMasked', title: '患者ID' },
+  { key: 'route', title: '营养途径' },
+  { key: 'targetVolume', title: '目标量' },
+  { key: 'completedVolume', title: '完成量' },
+  { key: 'speed', title: '营养速度' },
+  { key: 'depth', title: '喂养管深度' },
+  { key: 'patency', title: '通畅性' },
+  { key: 'gastricColor', title: '胃液颜色' },
+  { key: 'flushing', title: '冲管' },
+  { key: 'residualVolume', title: '胃残余量' },
+  { key: 'toleranceScore', title: '耐受性总分' },
+  { key: 'scoreE', title: 'E' },
+  { key: 'scoreF', title: 'F' },
+  { key: 'scoreG', title: 'G' },
+  { key: 'mechanicalComplication', title: '机械性并发症' },
+  { key: 'gastrointestinalComplication', title: '胃肠道并发症' },
+  { key: 'metabolicComplication', title: '代谢性并发症' },
+  { key: 'infectionComplication', title: '感染性并发症' },
+  { key: 'refeedingSyndrome', title: '再喂养综合征' },
+  { key: 'intervention', title: '干预措施' },
+  { key: 'pauseReason', title: '暂停原因' },
+  { key: 'remark', title: '备注' },
+  { key: 'inNumerator', title: '是否进入分子' },
+  { key: 'inDenominator', title: '是否进入分母' },
+  { key: 'judgmentReason', title: '判定原因' },
+  { key: 'dataSource', title: '数据来源' },
+];
+
+async function queryNutritionQuality({ url, title, query }) {
+  setLoading(true);
+  setStatus('正在查询营养质量控制指标，请稍候...');
+
+  try {
+    const resp = await fetch(url);
+    const json = await resp.json();
+    if (!resp.ok || json.code !== 200) throw new Error(json.msg || '查询失败');
+
+    lastNutritionQualityResult = json.data;
+    lastNutritionQualityQuery = {
+      ...query,
+      startMonth: json.data.startMonth || query.startMonth,
+      endMonth: json.data.endMonth || query.endMonth,
+    };
+
+    const dataStatus = json.data.dataStatus || 'ok';
+    const statusMsg = json.data.message || '';
+
+    if (dataStatus === 'ok') {
+      lastNutritionQualityStatus = {
+        text: `${title}，共 ${(json.data.indicators || []).length} 个指标。点击有效单元格可查看详情。`,
+        isError: false,
+      };
+    } else if (dataStatus === 'no_data') {
+      lastNutritionQualityStatus = {
+        text: `${title}，暂无有效数据。`,
+        isError: false,
+      };
+    } else if (dataStatus === 'collection_not_configured') {
+      lastNutritionQualityStatus = {
+        text: `${title}，集合未配置。请设置 NUTRITION_QUALITY_COLLECTION 环境变量。`,
+        isError: true,
+      };
+    } else if (dataStatus === 'collection_not_found') {
+      lastNutritionQualityStatus = {
+        text: `${title}，集合不存在。`,
+        isError: true,
+      };
+    } else {
+      lastNutritionQualityStatus = {
+        text: `${title}，${statusMsg}`,
+        isError: dataStatus !== 'ok',
+      };
+    }
+
+    if (activeView === 'nutritionQuality') {
+      renderNutritionQualityTable(json.data);
+      els.btnExport.disabled = !(json.data.indicators || []).length;
+      setStatus(lastNutritionQualityStatus.text, lastNutritionQualityStatus.isError);
+    }
+  } catch (err) {
+    lastNutritionQualityResult = null;
+    lastNutritionQualityQuery = null;
+    lastNutritionQualityStatus = { text: `营养质量指标查询失败：${err.message}`, isError: true };
+
+    if (activeView === 'nutritionQuality') {
+      renderNutritionQualityTable(null);
+      els.btnExport.disabled = true;
+      setStatus(lastNutritionQualityStatus.text, true);
+    }
+  } finally {
+    setLoading(false);
+  }
+}
+
+function renderNutritionQualityTable(data) {
+  statsTable.classList.remove('is-quality');
+  statsTable.classList.add('is-nutrition-quality');
+
+  const months = data?.months || [];
+  const indicators = data?.indicators || [];
+
+  els.tableHead.innerHTML = `
+    <th>序号</th>
+    <th>指标名称</th>
+    <th>计算公式</th>
+    <th>目标值</th>
+    <th>总计</th>
+    ${months.map(month => `<th>${escapeHtml(formatMonthLabel(month))}</th>`).join('')}
+  `;
+
+  if (!indicators.length) {
+    const dataStatus = data?.dataStatus || 'no_data';
+    const emptyMsg = formatNutritionQualityEmptyMessage(dataStatus, data?.message);
+    els.tableBody.innerHTML = `<tr><td colspan="${5 + months.length}" class="empty">${escapeHtml(emptyMsg)}</td></tr>`;
+    return;
+  }
+
+  els.tableBody.innerHTML = indicators.map((row, idx) => `
+    <tr>
+      <td>${idx + 1}</td>
+      <td class="name-cell">${escapeHtml(row.name)}</td>
+      <td class="formula-cell" title="${escapeHtml(row.formula || '')}">${escapeHtml(truncate(row.formula || '', 30))}</td>
+      <td>${escapeHtml(row.target || '--')}</td>
+      ${renderNutritionQualityCell(row, 'total', row.total)}
+      ${months.map(month => renderNutritionQualityCell(row, month, row.monthly?.[month])).join('')}
+    </tr>
+  `).join('');
+
+  // Bind click events
+  els.tableBody.querySelectorAll('.nq-cell-clickable').forEach(cell => {
+    cell.addEventListener('click', () => {
+      const indicatorKey = cell.dataset.key;
+      const month = cell.dataset.month;
+      openNutritionQualityDetail(indicatorKey, month);
+    });
+    cell.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        cell.click();
+      }
+    });
+  });
+}
+
+function renderNutritionQualityCell(row, monthKey, cellData) {
+  if (!cellData) {
+    return `<td class="nq-cell nq-cell-no-data">—</td>`;
+  }
+
+  const { value, numerator, denominator, compliant, dataStatus, message } = cellData;
+  const isTotal = monthKey === 'total';
+
+  // Format display value
+  let displayValue = '';
+  let cellClass = 'nq-cell';
+  let tooltip = '';
+
+  switch (dataStatus) {
+    case 'ok':
+      displayValue = row.unit === ':1'
+        ? `${value?.toFixed(2) ?? '--'}:1`
+        : `${value?.toFixed(2) ?? '--'}%`;
+      cellClass += compliant ? ' nq-cell-compliant' : ' nq-cell-noncompliant';
+      tooltip = `分子: ${numerator ?? '--'}\n分母: ${denominator ?? '--'}\n公式: ${row.formula || ''}\n目标值: ${row.target || '--'}`;
+      break;
+
+    case 'no_data':
+      displayValue = '无数据';
+      cellClass += ' nq-cell-no-data';
+      tooltip = '暂无数据';
+      break;
+
+    case 'no_denominator':
+      displayValue = '—';
+      cellClass += ' nq-cell-no-data';
+      tooltip = '无分母';
+      break;
+
+    case 'mapping_required':
+      displayValue = '字段映射待确认';
+      cellClass += ' nq-cell-mapping';
+      tooltip = message || '字段映射待确认';
+      break;
+
+    case 'collection_not_configured':
+      displayValue = '集合未配置';
+      cellClass += ' nq-cell-error';
+      tooltip = message || '集合未配置';
+      break;
+
+    case 'collection_not_found':
+      displayValue = '集合未找到';
+      cellClass += ' nq-cell-error';
+      tooltip = message || '集合未找到';
+      break;
+
+    case 'query_error':
+      displayValue = '查询失败';
+      cellClass += ' nq-cell-error';
+      tooltip = message || '查询失败';
+      break;
+
+    case 'disabled':
+      displayValue = '已禁用';
+      cellClass += ' nq-cell-no-data';
+      tooltip = '功能已禁用';
+      break;
+
+    default:
+      displayValue = '--';
+      cellClass += ' nq-cell-no-data';
+      break;
+  }
+
+  // Make clickable if has valid data
+  const clickable = dataStatus === 'ok' && numerator > 0;
+  if (clickable) {
+    cellClass += ' nq-cell-clickable';
+  }
+
+  const ariaLabel = `${row.name} ${isTotal ? '总计' : monthKey}: ${displayValue}`;
+
+  return `<td class="${cellClass}" data-key="${escapeHtml(row.key)}" data-month="${escapeHtml(monthKey)}" title="${escapeHtml(tooltip)}" ${clickable ? 'tabindex="0" role="button"' : ''} aria-label="${escapeHtml(ariaLabel)}">${escapeHtml(displayValue)}</td>`;
+}
+
+function formatNutritionQualityEmptyMessage(dataStatus, message) {
+  switch (dataStatus) {
+    case 'no_data': return '暂无有效数据';
+    case 'collection_not_configured': return '集合未配置，请设置 NUTRITION_QUALITY_COLLECTION 环境变量';
+    case 'collection_not_found': return '集合不存在';
+    case 'disabled': return '功能已禁用';
+    case 'query_error': return message || '查询失败';
+    default: return message || '暂无数据';
+  }
+}
+
+function truncate(text, maxLen) {
+  if (!text) return '';
+  return text.length > maxLen ? text.slice(0, maxLen) + '...' : text;
+}
+
+async function openNutritionQualityDetail(indicatorKey, month) {
+  if (!lastNutritionQualityQuery) return alert('请先查询营养质量控制指标');
+
+  const isTotal = month === 'total';
+  const startMonth = isTotal ? lastNutritionQualityQuery.startMonth : month;
+  const endMonth = isTotal ? lastNutritionQualityQuery.endMonth : month;
+
+  await openRemoteDetail({
+    title: '指标详情',
+    statusText: '正在加载详情...',
+    fetcher: () => {
+      const params = new URLSearchParams({
+        indicatorKey,
+        startMonth,
+        endMonth,
+        department: lastNutritionQualityQuery.department || '',
+      });
+      return fetchDetail(`${API_BASE}/nutrition/quality/detail`, Object.fromEntries(params.entries()));
+    },
+    meta: {
+      view: 'nutritionQuality',
+      startMonth,
+      endMonth,
+      department: lastNutritionQualityQuery.department || '',
+    },
+    onLoaded: detail => ({
+      title: `${detail.indicatorName || '指标详情'} - ${formatRangeLabel(startMonth, endMonth)}统计详情`,
+      status: `${formatRangeLabel(startMonth, endMonth)}，共 ${detail.rows?.length || 0} 条记录`,
+    }),
+  });
+}
+
+function exportNutritionQualitySummary() {
+  if (!window.XLSX) {
+    alert('XLSX 导出库未加载，请确认依赖已正确安装。');
+    return;
+  }
+
+  if (!lastNutritionQualityResult?.indicators?.length) return;
+
+  const data = lastNutritionQualityResult;
+  const months = data.months || [];
+  const generatedAt = new Date().toLocaleString('zh-CN', { hour12: false });
+  const rangeText = data.startMonth === data.endMonth ? data.startMonth : `${data.startMonth} 至 ${data.endMonth}`;
+
+  // Header
+  const header = ['序号', '指标名称', '计算公式', '分子定义', '分母定义', '目标值',
+    '总计', '总分子', '总分母', '总数据状态',
+    ...months.flatMap(m => [formatMonthLabel(m), `${formatMonthLabel(m)}分子`, `${formatMonthLabel(m)}分母`, `${formatMonthLabel(m)}状态`])];
+
+  // Rows
+  const rows = data.indicators.map((ind, idx) => {
+    const totalCell = ind.total || {};
+    const monthValues = months.flatMap(m => {
+      const cell = ind.monthly?.[m] || {};
+      return [
+        cell.dataStatus === 'ok' ? (ind.unit === ':1' ? `${cell.value?.toFixed(2) ?? ''}:1` : `${cell.value?.toFixed(2) ?? ''}%`) : (cell.dataStatus || ''),
+        cell.numerator ?? '',
+        cell.denominator ?? '',
+        cell.dataStatus || '',
+      ];
+    });
+
+    return [
+      idx + 1,
+      ind.name,
+      ind.formula || '',
+      ind.numeratorDefinition || '',
+      ind.denominatorDefinition || '',
+      ind.target || '',
+      totalCell.dataStatus === 'ok' ? (ind.unit === ':1' ? `${totalCell.value?.toFixed(2) ?? ''}:1` : `${totalCell.value?.toFixed(2) ?? ''}%`) : (totalCell.dataStatus || ''),
+      totalCell.numerator ?? '',
+      totalCell.denominator ?? '',
+      totalCell.dataStatus || '',
+      ...monthValues,
+    ];
+  });
+
+  // Build sheet
+  const metaRows = [
+    ['营养质量控制指标监测'],
+    [`统计范围：${rangeText}`],
+    [`导出时间：${generatedAt}`],
+    [],
+  ];
+
+  const aoa = [...metaRows, header, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const headerRowIndex = metaRows.length;
+  const lastColumnIndex = Math.max(header.length - 1, 0);
+
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: lastColumnIndex } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: lastColumnIndex } },
+    { s: { r: 2, c: 0 }, e: { r: 2, c: lastColumnIndex } },
+  ];
+
+  ws['!cols'] = header.map((col, idx) => ({
+    wch: Math.min(20, Math.max(8, getDisplayWidth(col) + 2)),
+  }));
+
+  ws['!freeze'] = { xSplit: 0, ySplit: headerRowIndex + 1 };
+
+  const wb = XLSX.utils.book_new();
+  wb.Props = {
+    Title: '营养质量控制指标监测',
+    Subject: rangeText,
+    Author: 'ICU统计',
+    CreatedDate: new Date(),
+  };
+  XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName('营养质量控制指标监测'));
+  XLSX.writeFile(wb, `${sanitizeFileName('营养质量控制指标监测')}_${data.startMonth}_${data.endMonth}.xlsx`);
 }
 
 function initializeDefaultFilters() {

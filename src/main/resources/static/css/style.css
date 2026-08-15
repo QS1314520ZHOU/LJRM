@@ -222,6 +222,51 @@ button:disabled { opacity: .6; cursor: not-allowed; }
   font-weight: 700;
 }
 
+/* 营养质量控制指标表 */
+.stats-table.is-nutrition-quality { width: 100%; min-width: 980px; table-layout: fixed; }
+.stats-table.is-nutrition-quality thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #bccaf2;
+}
+.stats-table.is-nutrition-quality th { background: #bccaf2; color: #1b2433; border-color: #7ea7ff; font-size: 14px; padding: 12px 10px; }
+.stats-table.is-nutrition-quality td { height: 44px; font-size: 13px; border-color: #d7e3f7; background: #fff; }
+.stats-table.is-nutrition-quality tr:nth-child(even) td { background: #edf3fc; }
+
+/* 营养质量表：前5列吸左 */
+.stats-table.is-nutrition-quality th:nth-child(1),
+.stats-table.is-nutrition-quality td:nth-child(1) { width: 60px; min-width: 60px; position: sticky; left: 0; z-index: 4; }
+.stats-table.is-nutrition-quality th:nth-child(2),
+.stats-table.is-nutrition-quality td:nth-child(2) { width: 200px; min-width: 200px; position: sticky; left: 60px; z-index: 4; }
+.stats-table.is-nutrition-quality th:nth-child(3),
+.stats-table.is-nutrition-quality td:nth-child(3) { width: 180px; min-width: 180px; position: sticky; left: 260px; z-index: 4; }
+.stats-table.is-nutrition-quality th:nth-child(4),
+.stats-table.is-nutrition-quality td:nth-child(4) { width: 100px; min-width: 100px; position: sticky; left: 440px; z-index: 4; }
+.stats-table.is-nutrition-quality th:nth-child(5),
+.stats-table.is-nutrition-quality td:nth-child(5) { width: 120px; min-width: 120px; position: sticky; left: 540px; z-index: 4; }
+
+.stats-table.is-nutrition-quality th:nth-child(-n+5) { z-index: 7; background: #bccaf2; }
+.stats-table.is-nutrition-quality td:nth-child(-n+4) { background: inherit; }
+.stats-table.is-nutrition-quality tr:nth-child(odd) td:nth-child(-n+4) { background: #fff; }
+.stats-table.is-nutrition-quality tr:nth-child(even) td:nth-child(-n+4) { background: #edf3fc; }
+
+.stats-table.is-nutrition-quality th:nth-child(n+6),
+.stats-table.is-nutrition-quality td:nth-child(n+6) { width: 130px; min-width: 130px; }
+
+/* 营养质量单元格状态 */
+.nq-cell { text-align: center; }
+.nq-cell-compliant { color: #16a34a; font-weight: 600; }
+.nq-cell-noncompliant { color: #dc2626; font-weight: 600; }
+.nq-cell-no-data { color: #9ca3af; }
+.nq-cell-mapping { color: #d97706; background: #fef3c7 !important; }
+.nq-cell-error { color: #dc2626; background: #fef2f2 !important; }
+.nq-cell-clickable { cursor: pointer; transition: .15s ease; }
+.nq-cell-clickable:hover { color: #124ee8; background: #eaf4ff !important; outline: 2px solid #ff4d57; outline-offset: -5px; font-weight: 700; }
+.nq-cell-clickable:focus { outline: 2px solid #407cff; outline-offset: -2px; }
+
+.formula-cell { text-align: left !important; font-size: 12px !important; color: #6b7280; }
+
 @media (max-width: 1180px) {
   .container { width: calc(100% - 32px); min-width: 0; }
   .filter-card { min-height: auto; }

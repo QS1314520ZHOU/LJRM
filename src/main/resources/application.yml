@@ -30,6 +30,43 @@ icu-stats:
   quality-rebuild-dept-code: ${QUALITY_REBUILD_DEPT_CODE:0211}
   quality-rebuild-department: ${QUALITY_REBUILD_DEPARTMENT:重症医学科}
   quality-rebuild-dry-run: ${QUALITY_REBUILD_DRY_RUN:true}
+  nutrition-quality:
+    enabled: ${NUTRITION_QUALITY_ENABLED:true}
+    collection: ${NUTRITION_QUALITY_COLLECTION:}
+    timezone: ${NUTRITION_QUALITY_TIMEZONE:Asia/Shanghai}
+    valid-value: ${NUTRITION_QUALITY_VALID_VALUE:valid}
+    default-dept-code: ${NUTRITION_QUALITY_DEPT_CODE:0211}
+    class-pattern: ${NUTRITION_QUALITY_CLASS_PATTERN:PatCnyyRestraintLjrmyy}
+    auto-discover-collection: ${NUTRITION_QUALITY_AUTO_DISCOVER_COLLECTION:false}
+    fields:
+      pid: ${NUTRITION_QUALITY_FIELD_PID:pid}
+      record-time: ${NUTRITION_QUALITY_FIELD_TIME:startTime}
+      route: ${NUTRITION_QUALITY_FIELD_ROUTE:tj}
+      speed: ${NUTRITION_QUALITY_FIELD_SPEED:sd}
+      depth: ${NUTRITION_QUALITY_FIELD_DEPTH:cd}
+      patency: ${NUTRITION_QUALITY_FIELD_PATENCY:tcx}
+      gastric-color: ${NUTRITION_QUALITY_FIELD_GASTRIC_COLOR:wyys}
+      flushing: ${NUTRITION_QUALITY_FIELD_FLUSHING:cg}
+      residual-volume: ${NUTRITION_QUALITY_FIELD_RESIDUAL:wcyl}
+      tolerance-score: ${NUTRITION_QUALITY_FIELD_SCORE:zf}
+      score-e: ${NUTRITION_QUALITY_FIELD_SCORE_E:e}
+      score-f: ${NUTRITION_QUALITY_FIELD_SCORE_F:f}
+      score-g: ${NUTRITION_QUALITY_FIELD_SCORE_G:g}
+      intervention: ${NUTRITION_QUALITY_FIELD_INTERVENTION:cs}
+      intervention-list: ${NUTRITION_QUALITY_FIELD_INTERVENTION_LIST:csList}
+      target-volume: ${NUTRITION_QUALITY_FIELD_TARGET_VOLUME:}
+      completed-volume: ${NUTRITION_QUALITY_FIELD_COMPLETED_VOLUME:}
+      mechanical-complication: ${NUTRITION_QUALITY_FIELD_MECHANICAL:}
+      gastrointestinal-complication: ${NUTRITION_QUALITY_FIELD_GASTROINTESTINAL:}
+      metabolic-complication: ${NUTRITION_QUALITY_FIELD_METABOLIC:}
+      infection-complication: ${NUTRITION_QUALITY_FIELD_INFECTION:}
+      refeeding-syndrome: ${NUTRITION_QUALITY_FIELD_REFEEDING:}
+      pause-reason: ${NUTRITION_QUALITY_FIELD_PAUSE_REASON:}
+      remark: ${NUTRITION_QUALITY_FIELD_REMARK:}
+      dept-code: ${NUTRITION_QUALITY_FIELD_DEPT_CODE:deptCode}
+      mrn: ${NUTRITION_QUALITY_FIELD_MRN:mrn}
+      name: ${NUTRITION_QUALITY_FIELD_NAME:name}
+      bed: ${NUTRITION_QUALITY_FIELD_BED:bed}
 
 logging:
   level:
