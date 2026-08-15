@@ -136,9 +136,13 @@ public class NutritionQualityService {
 
     /**
      * 指标明细查询
+     * 支持两层钻取：
+     *   - 无 itemOrder：返回汇总行（分子/分母/比率），带"查看详情"按钮
+     *   - 有 itemOrder：返回对应的患者记录明细
      */
     public NutritionQualityDetailResponse getDetail(String indicatorKey, String startMonth,
-                                                      String endMonth, String department, String month) {
+                                                      String endMonth, String department,
+                                                      String month, String itemOrder) {
         NutritionQualityDetailResponse response = new NutritionQualityDetailResponse();
         response.setIndicatorKey(indicatorKey);
 
@@ -171,12 +175,22 @@ public class NutritionQualityService {
             List<Document> records = queryRecords(effectiveStart, effectiveEnd, department, collection);
             List<Document> validRecords = filterValidRecords(records);
 
-            // 构建明细
-            List<Map<String, String>> columns = buildDetailColumns(indicatorKey);
-            List<Map<String, Object>> rows = buildDetailRows(indicatorKey, validRecords, effectiveStart, department);
+            if (itemOrder != null && !itemOrder.isEmpty()) {
+                // 有 itemOrder：返回患者记录明细
+                List<Map<String, String>> columns = buildDetailColumns(indicatorKey);
+                List<Map<String, Object>> rows = buildDetailRows(indicatorKey, validRecords,
+                        effectiveStart, department, itemOrder);
+                response.setColumns(columns);
+                response.setRows(rows);
+            } else {
+                // 无 itemOrder：返回汇总行（分子/分母/比率），带"查看详情"按钮
+                List<Map<String, String>> columns = summaryColumnsList();
+                List<Map<String, Object>> rows = buildSummaryRows(indicatorKey, validRecords,
+                        effectiveStart, effectiveEnd, department);
+                response.setColumns(columns);
+                response.setRows(rows);
+            }
 
-            response.setColumns(columns);
-            response.setRows(rows);
             response.setDataStatus("ok");
 
         } catch (Exception e) {
@@ -607,7 +621,115 @@ public class NutritionQualityService {
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // 明细构建
+    // 汇总视图（第一层：分子/分母/比率，带"查看详情"按钮）
+    // ════════════════════════════════════════════════════════════════════
+
+    private List<Map<String, String>> summaryColumnsList() {
+        return Arrays.asList(
+                Map.of("key", "index", "title", "序号"),
+                Map.of("key", "item", "title", "项目"),
+                Map.of("key", "value", "title", "数值"),
+                Map.of("key", "action", "title", "操作", "type", "action"));
+    }
+
+    private List<Map<String, Object>> buildSummaryRows(String indicatorKey, List<Document> records,
+                                                         String startMonth, String endMonth,
+                                                         String department) {
+        // 统计分子/分母
+        int numerator = 0;
+        int denominator = 0;
+
+        for (Document record : records) {
+            boolean inNumerator = false;
+            boolean inDenominator = true;
+
+            switch (indicatorKey) {
+                case "enteralInterruptionRate":
+                    inNumerator = adapter.hasPauseIntervention(record);
+                    break;
+                case "feedingIntoleranceRate":
+                    Integer score = adapter.getToleranceScore(record);
+                    inNumerator = (score != null && score > 0) || adapter.hasPauseIntervention(record);
+                    break;
+                case "enteralPlanCompletionRate":
+                    Double target = adapter.getTargetVolume(record);
+                    Double completed = adapter.getCompletedVolume(record);
+                    inDenominator = target != null && target > 0 && completed != null;
+                    inNumerator = inDenominator && completed >= target;
+                    break;
+                default:
+                    break;
+            }
+
+            if (inDenominator) denominator++;
+            if (inNumerator) numerator++;
+        }
+
+        String ratio = denominator > 0
+                ? String.format("%.2f%%", numerator * 100.0 / denominator)
+                : "N/A";
+
+        // 构建汇总行
+        List<Map<String, Object>> rows = new ArrayList<>();
+        int index = 1;
+
+        // 分子行
+        Map<String, Object> numeratorRow = new LinkedHashMap<>();
+        numeratorRow.put("index", index++);
+        numeratorRow.put("item", "分子（" + getNumeratorLabel(indicatorKey) + "）");
+        numeratorRow.put("value", String.valueOf(numerator));
+        numeratorRow.put("action", makeAction(indicatorKey, startMonth, endMonth, "numerator"));
+        rows.add(numeratorRow);
+
+        // 分母行
+        Map<String, Object> denominatorRow = new LinkedHashMap<>();
+        denominatorRow.put("index", index++);
+        denominatorRow.put("item", "分母（" + getDenominatorLabel(indicatorKey) + "）");
+        denominatorRow.put("value", String.valueOf(denominator));
+        denominatorRow.put("action", makeAction(indicatorKey, startMonth, endMonth, "denominator"));
+        rows.add(denominatorRow);
+
+        // 比率行
+        Map<String, Object> ratioRow = new LinkedHashMap<>();
+        ratioRow.put("index", index++);
+        ratioRow.put("item", "比率");
+        ratioRow.put("value", ratio);
+        rows.add(ratioRow);
+
+        return rows;
+    }
+
+    private Map<String, Object> makeAction(String indicatorKey, String startMonth, String endMonth,
+                                             String itemOrder) {
+        Map<String, Object> action = new LinkedHashMap<>();
+        action.put("label", "查看详情");
+        action.put("target", indicatorKey);
+        action.put("startMonth", startMonth);
+        action.put("endMonth", endMonth);
+        action.put("itemOrder", itemOrder);
+        return action;
+    }
+
+    private String getNumeratorLabel(String indicatorKey) {
+        switch (indicatorKey) {
+            case "enteralInterruptionRate": return "中断例数";
+            case "feedingIntoleranceRate": return "不耐受例数";
+            case "enteralPlanCompletionRate": return "完成例数";
+            default: return "分子";
+        }
+    }
+
+    private String getDenominatorLabel(String indicatorKey) {
+        switch (indicatorKey) {
+            case "enteralInterruptionRate": return "总肠内营养例数";
+            case "feedingIntoleranceRate": return "总肠内营养例数";
+            case "enteralPlanCompletionRate": return "有目标量例数";
+            default: return "分母";
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 明细构建（第二层：患者记录）
     // ════════════════════════════════════════════════════════════════════
 
     private List<Map<String, String>> buildDetailColumns(String indicatorKey) {
@@ -628,7 +750,8 @@ public class NutritionQualityService {
     }
 
     private List<Map<String, Object>> buildDetailRows(String indicatorKey, List<Document> records,
-                                                        String month, String department) {
+                                                        String month, String department,
+                                                        String itemOrder) {
         List<Map<String, Object>> rows = new ArrayList<>();
         int index = 1;
 
@@ -668,6 +791,10 @@ public class NutritionQualityService {
                     judgmentReason = "待确认";
                     break;
             }
+
+            // 按 itemOrder 过滤：numerator 只保留分子记录，denominator 只保留分母记录
+            if ("numerator".equals(itemOrder) && !inNumerator) continue;
+            if ("denominator".equals(itemOrder) && !inDenominator) continue;
 
             // Build patient info
             String patientName = adapter.getName(record);

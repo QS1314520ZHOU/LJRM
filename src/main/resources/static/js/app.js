@@ -624,7 +624,13 @@ function renderDetail(detail) {
       const itemOrder = button.dataset.itemOrder || '';
       const itemLabel = button.dataset.itemLabel || '';
       if (!target) return;
-      await openQualityDetail(target, startMonth, endMonth, itemOrder, itemLabel);
+
+      // 根据当前视图调用不同的详情函数
+      if (lastDetailMeta?.view === 'nutritionQuality') {
+        await openNutritionQualityDetailByOrder(target, startMonth, endMonth, itemOrder, itemLabel);
+      } else {
+        await openQualityDetail(target, startMonth, endMonth, itemOrder, itemLabel);
+      }
     });
   });
 }
@@ -1691,6 +1697,35 @@ async function openNutritionQualityDetail(indicatorKey, month) {
     onLoaded: detail => ({
       title: `${detail.indicatorName || '指标详情'} - ${formatRangeLabel(startMonth, endMonth)}统计详情`,
       status: `${formatRangeLabel(startMonth, endMonth)}，共 ${detail.rows?.length || 0} 条记录`,
+    }),
+  });
+}
+
+async function openNutritionQualityDetailByOrder(indicatorKey, startMonth, endMonth, itemOrder, itemLabel) {
+  const label = itemOrder === 'numerator' ? '分子' : '分母';
+
+  await openRemoteDetail({
+    title: '指标详情',
+    statusText: '正在加载详情...',
+    fetcher: () => {
+      const params = new URLSearchParams({
+        indicatorKey,
+        startMonth,
+        endMonth,
+        department: lastNutritionQualityQuery?.department || '',
+        itemOrder,
+      });
+      return fetchDetail(`${API_BASE}/nutrition/quality/detail`, Object.fromEntries(params.entries()));
+    },
+    meta: {
+      view: 'nutritionQuality',
+      startMonth,
+      endMonth,
+      department: lastNutritionQualityQuery?.department || '',
+    },
+    onLoaded: detail => ({
+      title: `${detail.indicatorName || '指标详情'}（${label}） - ${formatRangeLabel(startMonth, endMonth)}统计详情`,
+      status: `${formatRangeLabel(startMonth, endMonth)}，${label}共 ${detail.rows?.length || 0} 条记录`,
     }),
   });
 }

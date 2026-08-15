@@ -58,7 +58,7 @@ public class NutritionQualityController {
 
     /**
      * GET /api/stats/nutrition/quality/detail?indicatorKey=feedingIntoleranceRate&startMonth=2026-01&endMonth=2026-12&department=重症医学科
-     * 可选: month=2026-08
+     * 可选: month=2026-08, itemOrder=numerator|denominator
      */
     @GetMapping("/detail")
     public ApiResponse<NutritionQualityDetailResponse> detail(
@@ -66,10 +66,11 @@ public class NutritionQualityController {
             @RequestParam String startMonth,
             @RequestParam String endMonth,
             @RequestParam(defaultValue = "") String department,
-            @RequestParam(required = false) String month) {
+            @RequestParam(required = false) String month,
+            @RequestParam(required = false) String itemOrder) {
         try {
             NutritionQualityDetailResponse data = nutritionQualityService.getDetail(
-                    indicatorKey, startMonth, endMonth, department, month);
+                    indicatorKey, startMonth, endMonth, department, month, itemOrder);
             return ApiResponse.ok(data);
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(400, e.getMessage());
