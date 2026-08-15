@@ -1209,9 +1209,22 @@ public class QualityService {
                 rows.add(makeSummaryRow(2, "ICU患者实际病死率", trimTrailingZeros(actualRate, 6), makeAction(spec, months.get(0), months.get(months.size()-1), 0)));
                 rows.add(makeSummaryRow(3, "同期ICU患者预计病死率", trimTrailingZeros(predictedRate, 6), makeAction(spec, months.get(0), months.get(months.size()-1), 1)));
                 break;
-            default:
-                // For other calculated keys, return empty
+            default: {
+                // Generic calculated indicator: show ratio + numerator + denominator
+                Map<String, Map<String, Integer>> basicStats2 = getBasicMonthlyStats(months, department);
+                Map<String, Map<String, Object>> calculatedStats2 = getCalculatedMonthlyStats(months, department, basicStats2);
+                double totalNum = 0, totalDenom = 0;
+                for (String m : months) {
+                    Map<String, Double> vals = getCalculatedMetricValues(key, calculatedStats2.getOrDefault(m, Collections.emptyMap()));
+                    totalNum += vals.get("numerator");
+                    totalDenom += vals.get("denominator");
+                }
+                String ratio = totalDenom > 0 ? String.format("%.2f%%", totalNum * 100.0 / totalDenom) : "N/A";
+                rows.add(makeSummaryRow(1, spec.get("name"), ratio, null));
+                rows.add(makeSummaryRow(2, "分子", trimTrailingZeros(totalNum, 2), makeAction(spec, months.get(0), months.get(months.size()-1), 0)));
+                rows.add(makeSummaryRow(3, "分母", trimTrailingZeros(totalDenom, 2), makeAction(spec, months.get(0), months.get(months.size()-1), 1)));
                 break;
+            }
         }
         return rows;
     }
@@ -1219,8 +1232,23 @@ public class QualityService {
     private List<Map<String, Object>> buildSetBasedSummaryRows(Map<String, Object> spec, List<String> months, String startMonth, String endMonth, String department) {
         String key = (String) spec.get("key");
         String type = (String) spec.get("type");
+
+        Map<String, Map<String, Integer>> basicStats = getBasicMonthlyStats(months, department);
+        Map<String, Map<String, Object>> calculatedStats = getCalculatedMonthlyStats(months, department, basicStats);
+
+        double totalNum = 0, totalDenom = 0;
+        for (String m : months) {
+            Map<String, Double> vals = getCalculatedMetricValues(key, calculatedStats.getOrDefault(m, Collections.emptyMap()));
+            totalNum += vals.get("numerator");
+            totalDenom += vals.get("denominator");
+        }
+
+        String ratio = totalDenom > 0 ? String.format("%.2f%%", totalNum * 100.0 / totalDenom) : "N/A";
+
         List<Map<String, Object>> rows = new ArrayList<>();
-        // Simplified - actual order matching would require full implementation
+        rows.add(makeSummaryRow(1, spec.get("name"), ratio, null));
+        rows.add(makeSummaryRow(2, "分子", trimTrailingZeros(totalNum, 2), makeAction(spec, startMonth, endMonth, 0)));
+        rows.add(makeSummaryRow(3, "分母", trimTrailingZeros(totalDenom, 2), makeAction(spec, startMonth, endMonth, 1)));
         return rows;
     }
 
@@ -1266,7 +1294,7 @@ public class QualityService {
     // ════════════════════════════════════════════════════════════════════
 
     private Map<String, Object> buildCalculatedDetailRows(Map<String, Object> spec, String key, int itemOrder, List<String> months, String startMonth, String endMonth, String department) {
-        List<Map<String, Object>> rows = Collections.emptyList();
+        List<Map<String, Object>> rows = new ArrayList<>();
         List<Map<String, String>> columns = PATIENT_DETAIL_COLUMNS;
 
         if ("predictedMortalityRate".equals(key)) {
@@ -1277,23 +1305,277 @@ public class QualityService {
                 rows = getBasicPatientRows("icuCensus", months, department);
             }
         } else if ("unplannedIcuTransferRate".equals(key)) {
-            if (itemOrder == 0) {
-                rows = getBasicPatientRows("icuCensus", months, department);
-            } else {
-                rows = getBasicPatientRows("icuCensus", months, department);
-            }
+            rows = getBasicPatientRows("icuCensus", months, department);
+        } else if ("apacheLt15DeathRate".equals(key)) {
+            rows = getApachePatientRows(key, itemOrder, months, department);
+            columns = APACHE_DETAIL_COLUMNS;
+        } else if ("standardizedMortalityIndex".equals(key)) {
+            rows = getBasicPatientRows("icuCensus", months, department);
+        } else {
+            // Generic calculated indicator: use order-based patient matching
+            rows = getCalculatedIndicatorPatientRows(key, itemOrder, months, department);
         }
         return detailResult(spec, columns, rows);
     }
 
     private Map<String, Object> buildSetBasedDetailRows(Map<String, Object> spec, String key, int itemOrder, List<String> months, String startMonth, String endMonth, String department) {
-        List<Map<String, Object>> rows = Collections.emptyList();
+        List<Map<String, Object>> rows = getCalculatedIndicatorPatientRows(key, itemOrder, months, department);
         return detailResult(spec, PATIENT_DETAIL_COLUMNS, rows);
     }
 
     private Map<String, Object> buildExtubationReturnDetailRows(Map<String, Object> spec, String key, int itemOrder, List<String> months, String department) {
-        List<Map<String, Object>> rows = Collections.emptyList();
-        return detailResult(spec, PATIENT_DETAIL_COLUMNS, rows);
+        List<Map<String, Object>> rows = new ArrayList<>();
+
+        for (String monthKey : months) {
+            MonthRange range = DateRangeUtils.getMonthRange(monthKey);
+            Date start = range.getStartDate();
+            Date end = range.getEndDate();
+
+            if ("unplannedExtubationRate".equals(key) || "reintubation48hRate".equals(key)) {
+                // Get tube records for this month
+                Query tubeQuery = new Query(Criteria.where("type").is("气插管")
+                        .and("valid").ne(false)
+                        .and("replace").ne(true)
+                        .and("endTime").gte(start).lte(end));
+                List<Document> tubes = smartCareMongo.find(tubeQuery, Document.class, CollectionConstants.TUBE_EXE);
+
+                Set<String> pids = tubes.stream()
+                        .map(t -> String.valueOf(t.get("pid")))
+                        .filter(pid -> !pid.isEmpty() && !"null".equals(pid))
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
+
+                if (!pids.isEmpty()) {
+                    // Get patients
+                    Query patientQuery = new Query(Criteria.where("_id").in(
+                            pids.stream().map(ObjectId::new).collect(Collectors.toList())));
+                    List<Document> patients = smartCareMongo.find(patientQuery, Document.class, CollectionConstants.PATIENT);
+                    Map<String, Document> patientByPid = new LinkedHashMap<>();
+                    for (Document p : patients) {
+                        patientByPid.put(p.get("_id").toString(), p);
+                    }
+
+                    if ("unplannedExtubationRate".equals(key)) {
+                        // Numerator: unplanned extubation
+                        if (itemOrder == 0) {
+                            for (Document t : tubes) {
+                                if (Boolean.TRUE.equals(t.get("unPlannedEndTube"))) {
+                                    String pid = String.valueOf(t.get("pid"));
+                                    Document patient = patientByPid.get(pid);
+                                    if (patient != null) {
+                                        Map<String, Object> extra = new LinkedHashMap<>();
+                                        extra.put("tubeTime", t.get("endTime"));
+                                        extra.put("unPlanned", "是");
+                                        rows.add(toPatientDetailRow(patient, rows.size() + 1, monthKey, extra));
+                                    }
+                                }
+                            }
+                        } else {
+                            // Denominator: all tube records
+                            for (Document t : tubes) {
+                                String pid = String.valueOf(t.get("pid"));
+                                Document patient = patientByPid.get(pid);
+                                if (patient != null) {
+                                    Map<String, Object> extra = new LinkedHashMap<>();
+                                    extra.put("tubeTime", t.get("endTime"));
+                                    rows.add(toPatientDetailRow(patient, rows.size() + 1, monthKey, extra));
+                                }
+                            }
+                        }
+                    } else {
+                        // reintubation48hRate
+                        // Get all history for these patients
+                        Query historyQuery = new Query(Criteria.where("pid").in(pids)
+                                .and("type").is("气插管")
+                                .and("valid").ne(false)
+                                .and("replace").ne(true));
+                        historyQuery.with(Sort.by(Sort.Direction.ASC, "startTime"));
+                        List<Document> allHistory = smartCareMongo.find(historyQuery, Document.class, CollectionConstants.TUBE_EXE);
+
+                        Map<String, List<Document>> byPid = new LinkedHashMap<>();
+                        for (Document t : allHistory) {
+                            String pid = String.valueOf(t.get("pid"));
+                            byPid.computeIfAbsent(pid, k -> new ArrayList<>()).add(t);
+                        }
+
+                        if (itemOrder == 0) {
+                            // Numerator: reintubated within 48h
+                            for (Document t : tubes) {
+                                Date endTime = asDate(t.get("endTime"));
+                                if (endTime == null) continue;
+                                String pid = String.valueOf(t.get("pid"));
+                                List<Document> arr = byPid.getOrDefault(pid, Collections.emptyList());
+                                for (Document x : arr) {
+                                    Date xStart = asDate(x.get("startTime"));
+                                    if (xStart != null && xStart.after(endTime) && (xStart.getTime() - endTime.getTime()) <= HOURS_48_MS) {
+                                        Document patient = patientByPid.get(pid);
+                                        if (patient != null) {
+                                            Map<String, Object> extra = new LinkedHashMap<>();
+                                            extra.put("tubeTime", endTime);
+                                            extra.put("reintubationTime", xStart);
+                                            rows.add(toPatientDetailRow(patient, rows.size() + 1, monthKey, extra));
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        } else {
+                            // Denominator: all tube records
+                            for (Document t : tubes) {
+                                String pid = String.valueOf(t.get("pid"));
+                                Document patient = patientByPid.get(pid);
+                                if (patient != null) {
+                                    Map<String, Object> extra = new LinkedHashMap<>();
+                                    extra.put("tubeTime", t.get("endTime"));
+                                    rows.add(toPatientDetailRow(patient, rows.size() + 1, monthKey, extra));
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if ("icuReturn48hRate".equals(key)) {
+                // Get patients discharged during the month with type containing "转出"
+                Query outQuery = new Query(Criteria.where("icuDischargeTime").gte(start).lte(end)
+                        .and("dischargedType").regex("转出"));
+                List<Document> out = smartCareMongo.find(outQuery, Document.class, CollectionConstants.PATIENT);
+
+                if (!out.isEmpty()) {
+                    List<String> mrns = out.stream()
+                            .map(p -> (String) p.get("mrn"))
+                            .filter(Objects::nonNull)
+                            .distinct()
+                            .collect(Collectors.toList());
+
+                    Query allQuery = new Query(Criteria.where("mrn").in(mrns));
+                    allQuery.with(Sort.by(Sort.Direction.ASC, "icuAdmissionTime"));
+                    List<Document> all = smartCareMongo.find(allQuery, Document.class, CollectionConstants.PATIENT);
+
+                    Map<String, List<Document>> byMrn = new LinkedHashMap<>();
+                    for (Document p : all) {
+                        String mrn = (String) p.get("mrn");
+                        if (mrn != null) byMrn.computeIfAbsent(mrn, k -> new ArrayList<>()).add(p);
+                    }
+
+                    if (itemOrder == 0) {
+                        // Numerator: returned within 48h
+                        for (Document p : out) {
+                            Date dischargeTime = asDate(p.get("icuDischargeTime"));
+                            String mrn = (String) p.get("mrn");
+                            if (dischargeTime == null || mrn == null) continue;
+
+                            List<Document> arr = byMrn.getOrDefault(mrn, Collections.emptyList());
+                            for (Document r : arr) {
+                                Date rAdmission = asDate(r.get("icuAdmissionTime"));
+                                if (rAdmission != null && rAdmission.after(dischargeTime)
+                                        && (rAdmission.getTime() - dischargeTime.getTime()) <= HOURS_48_MS) {
+                                    Map<String, Object> extra = new LinkedHashMap<>();
+                                    extra.put("dischargeTime", dischargeTime);
+                                    extra.put("returnTime", rAdmission);
+                                    rows.add(toPatientDetailRow(p, rows.size() + 1, monthKey, extra));
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        // Denominator: all discharged patients
+                        for (Document p : out) {
+                            Map<String, Object> extra = new LinkedHashMap<>();
+                            extra.put("dischargeTime", p.get("icuDischargeTime"));
+                            rows.add(toPatientDetailRow(p, rows.size() + 1, monthKey, extra));
+                        }
+                    }
+                }
+            }
+        }
+        return detailResult(spec, columns, rows);
+    }
+
+    /**
+     * Get patient rows for calculated/set-based indicators using order matching.
+     */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> getCalculatedIndicatorPatientRows(String key, int itemOrder, List<String> months, String department) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+
+        for (String monthKey : months) {
+            List<Document> patients = qualityCalcService.getInIcuPatients(monthKey, department);
+            if (patients.isEmpty()) continue;
+
+            Map<String, Object> matched = null;
+
+            switch (key) {
+                case "shockBundleRate":
+                    matched = qualityCalcService.getMatchedPatientsByOrderFilter(monthKey, patients,
+                            orderQueryToMonthEnd(monthKey, Collections.singletonList("感染性休克集束化治疗")));
+                    break;
+                case "shockUltrasoundRate":
+                    matched = qualityCalcService.calcOrderBasedCarryover(monthKey, department, "休克护理常规", "重症超声筛查评估");
+                    break;
+                case "shockHemodynamicRate":
+                    matched = qualityCalcService.calcOrderBasedCarryover(monthKey, department, "休克护理常规", "CVP");
+                    break;
+                case "ardsRate":
+                    matched = qualityCalcService.calcOrderBasedCarryover(monthKey, department, "中重度ARDS护理常规", "俯卧位通气");
+                    break;
+                case "acuteBrainInjuryRate":
+                    matched = qualityCalcService.calcOrderBasedCarryover(monthKey, department, "急性脑损伤护理常规", "格拉斯哥昏迷评分");
+                    break;
+                case "dvtRate":
+                    matched = qualityCalcService.calcDVT(monthKey, department);
+                    break;
+                case "en48hRate":
+                    matched = qualityCalcService.calcEN48h(monthKey, department);
+                    break;
+                case "painRate":
+                    matched = qualityCalcService.calcOrderHitOnIcuCarryover(monthKey, department, "镇痛评估");
+                    break;
+                case "sedationRate":
+                    matched = qualityCalcService.calcOrderHitOnIcuCarryover(monthKey, department, "镇静评估");
+                    break;
+                case "rescueSuccessRate":
+                    matched = qualityCalcService.calcRescue(monthKey);
+                    break;
+                default:
+                    // For unknown indicators, show all ICU patients as denominator
+                    if (itemOrder == 1) {
+                        for (Document patient : patients) {
+                            rows.add(toPatientDetailRow(patient, rows.size() + 1, monthKey, Collections.emptyMap()));
+                        }
+                    }
+                    continue;
+            }
+
+            if (matched == null) continue;
+
+            // For most indicators, the matched map has "done" (numerator) and "denominator" keys
+            List<Document> doneList = (List<Document>) matched.get("done");
+            List<Document> denomList = (List<Document>) matched.get("denominator");
+
+            // For rescue success rate, use different keys
+            if ("rescueSuccessRate".equals(key)) {
+                // Rescue uses calcRescue which returns different structure
+                // itemOrder 0 = success (num), 1 = total rescues (denom)
+                // We'll show all rescue patients as denominator
+                if (itemOrder == 1) {
+                    for (Document patient : patients) {
+                        rows.add(toPatientDetailRow(patient, rows.size() + 1, monthKey, Collections.emptyMap()));
+                    }
+                }
+                continue;
+            }
+
+            if (itemOrder == 0 && doneList != null) {
+                // Numerator: patients who completed the order
+                for (Document patient : doneList) {
+                    rows.add(toPatientDetailRow(patient, rows.size() + 1, monthKey, Collections.emptyMap()));
+                }
+            } else if (itemOrder == 1 && denomList != null) {
+                // Denominator: all matched patients
+                for (Document patient : denomList) {
+                    rows.add(toPatientDetailRow(patient, rows.size() + 1, monthKey, Collections.emptyMap()));
+                }
+            }
+        }
+        return rows;
     }
 
     private List<Map<String, Object>> getPredictedMortalityRows(List<String> months, String department) {
