@@ -475,6 +475,7 @@ public class QualityService {
     }
 
     private List<Document> filterByCode(List<Document> docs, String code) {
+        if (code == null) return Collections.emptyList();
         return docs.stream().filter(d -> code.equals(d.get("indicatorCode"))).collect(Collectors.toList());
     }
 
