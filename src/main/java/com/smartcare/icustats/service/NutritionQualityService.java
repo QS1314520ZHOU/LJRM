@@ -611,39 +611,17 @@ public class NutritionQualityService {
     // ════════════════════════════════════════════════════════════════════
 
     private List<Map<String, String>> buildDetailColumns(String indicatorKey) {
+        // 精简列：只显示重要字段，参考质控详情格式
         List<Map<String, String>> columns = new ArrayList<>();
         columns.add(Map.of("key", "index", "title", "序号"));
         columns.add(Map.of("key", "recordTime", "title", "评估时间"));
-        columns.add(Map.of("key", "statMonth", "title", "统计月份"));
-        columns.add(Map.of("key", "department", "title", "科室"));
-        columns.add(Map.of("key", "deptCode", "title", "科室代码"));
+        columns.add(Map.of("key", "patientIdMasked", "title", "患者ID"));
         columns.add(Map.of("key", "bedNo", "title", "床号"));
         columns.add(Map.of("key", "name", "title", "姓名"));
-        columns.add(Map.of("key", "hospitalNo", "title", "病历号"));
-        columns.add(Map.of("key", "patientIdMasked", "title", "患者ID"));
         columns.add(Map.of("key", "route", "title", "营养途径"));
-        columns.add(Map.of("key", "targetVolume", "title", "目标量"));
-        columns.add(Map.of("key", "completedVolume", "title", "完成量"));
-        columns.add(Map.of("key", "speed", "title", "营养速度"));
-        columns.add(Map.of("key", "depth", "title", "喂养管深度"));
-        columns.add(Map.of("key", "patency", "title", "通畅性"));
-        columns.add(Map.of("key", "gastricColor", "title", "胃液颜色"));
-        columns.add(Map.of("key", "flushing", "title", "冲管"));
-        columns.add(Map.of("key", "residualVolume", "title", "胃残余量"));
-        columns.add(Map.of("key", "toleranceScore", "title", "耐受性总分"));
-        columns.add(Map.of("key", "scoreE", "title", "E"));
-        columns.add(Map.of("key", "scoreF", "title", "F"));
-        columns.add(Map.of("key", "scoreG", "title", "G"));
-        columns.add(Map.of("key", "mechanicalComplication", "title", "机械性并发症"));
-        columns.add(Map.of("key", "gastrointestinalComplication", "title", "胃肠道并发症"));
-        columns.add(Map.of("key", "metabolicComplication", "title", "代谢性并发症"));
-        columns.add(Map.of("key", "infectionComplication", "title", "感染性并发症"));
-        columns.add(Map.of("key", "refeedingSyndrome", "title", "再喂养综合征"));
         columns.add(Map.of("key", "intervention", "title", "干预措施"));
-        columns.add(Map.of("key", "pauseReason", "title", "暂停原因"));
-        columns.add(Map.of("key", "remark", "title", "备注"));
-        columns.add(Map.of("key", "inNumerator", "title", "是否进入分子"));
-        columns.add(Map.of("key", "inDenominator", "title", "是否进入分母"));
+        columns.add(Map.of("key", "inNumerator", "title", "进入分子"));
+        columns.add(Map.of("key", "inDenominator", "title", "进入分母"));
         columns.add(Map.of("key", "judgmentReason", "title", "判定原因"));
         columns.add(Map.of("key", "dataSource", "title", "数据来源"));
         return columns;
