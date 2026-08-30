@@ -3,22 +3,21 @@
 
     // ============ 配置 ============
     var API_BASE = '/api/blood-sugar/patient';
-    var SMARTCARE_ALLOWED_ORIGINS = [
-        window.location.origin,
-        'http://localhost:3000',
-        'http://127.0.0.1:3000'
-    ];
+    var MAX_HANDSHAKE_ATTEMPTS = 10;
+    var HANDSHAKE_INTERVAL_MS = 500;
 
-    // ============ 状态 ============
+    // ============ 握手状态 ============
     var currentPatientId = null;
-    var currentPatient = null;
-    var currentRange = null;
     var currentAbortController = null;
-    var requestVersion = 0;
-    var handshakeRetryTimer = null;
+    var readyTimer = null;
+    var liveReceived = false;
     var handshakeAttempts = 0;
-    var MAX_HANDSHAKE_ATTEMPTS = 20;
-    var debounceTimer = null;
+    var cachedAccount = null;
+    var cachedToken = null;
+    var messageHandler = null;
+    var visibilityHandler = null;
+    var pageshowHandler = null;
+    var pagehideHandler = null;
 
     // ============ DOM 元素 ============
     var $loading = document.getElementById('loading');
@@ -46,6 +45,200 @@
     var $btnCloseSteroidDialog = document.getElementById('btnCloseSteroidDialog');
     var $btnConfirmSteroidDialog = document.getElementById('btnConfirmSteroidDialog');
     var $steroidDetailBody = document.getElementById('steroidDetailBody');
+    var debounceTimer = null;
+    var currentRange = null;
+    var currentPatient = null;
+    var requestVersion = 0;
+
+    // ============ SmartCare 来源校验 ============
+    function getParentOrigin() {
+        try {
+            if (!document.referrer) return '';
+            return new URL(document.referrer).origin;
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function isTrustedParentMessage(event) {
+        if (!event || event.source !== window.parent) {
+            return false;
+        }
+        var parentOrigin = getParentOrigin();
+        if (parentOrigin && event.origin !== parentOrigin) {
+            dbg('origin 不匹配：referrer=' + parentOrigin + '，event=' + event.origin);
+            return false;
+        }
+        return true;
+    }
+
+    // ============ 患者ID提取 ============
+    function extractPatientId(patient) {
+        if (!patient || typeof patient !== 'object') return null;
+
+        var id = patient.id || patient._id || patient.pid || patient.patientId || patient.patientID;
+        if (!id && patient.patient) {
+            id = patient.patient.id || patient.patient._id;
+        }
+        if (id === undefined || id === null) return null;
+
+        var strId = String(id).trim();
+        if (strId === '' || strId === '[object Object]') return null;
+        return strId;
+    }
+
+    // ============ 消息验证 ============
+    function isSmartCareHostMessage(data) {
+        if (!data || typeof data !== 'object') return false;
+        if (data.type !== 'SmartCare') return false;
+        var patient = data.patient;
+        if (!patient || typeof patient !== 'object') return false;
+        var pid = extractPatientId(patient);
+        return !!pid;
+    }
+
+    function isLegacyPatientMessage(data) {
+        if (!data || typeof data !== 'object') return false;
+        var t = data.type;
+        if (t !== 'SmartCare-patient-info' && t !== 'SmartCare-set-patient') return false;
+        var patient = data.patient || data;
+        if (!patient || typeof patient !== 'object') return false;
+        return !!extractPatientId(patient);
+    }
+
+    // ============ 握手消息发送 ============
+    function postReady() {
+        try {
+            window.parent.postMessage({ type: 'SmartCareReady' }, '*');
+            window.parent.postMessage({ type: 'SmartCare-form-ready', form: 'bloodSugar' }, '*');
+        } catch (e) {
+            // 不因宿主通信异常阻止页面初始化
+        }
+    }
+
+    function startHandshake() {
+        stopHandshake();
+        handshakeAttempts = 0;
+        liveReceived = false;
+        dbg('开始握手');
+        postReady();
+        readyTimer = setInterval(function () {
+            handshakeAttempts++;
+            if (handshakeAttempts >= MAX_HANDSHAKE_ATTEMPTS) {
+                stopHandshake();
+                dbg('握手超时(' + MAX_HANDSHAKE_ATTEMPTS + '次)');
+                setTextContent($rangeStatus, '等待宿主患者信息');
+                return;
+            }
+            postReady();
+        }, HANDSHAKE_INTERVAL_MS);
+    }
+
+    function stopHandshake() {
+        if (readyTimer) {
+            clearInterval(readyTimer);
+            readyTimer = null;
+        }
+    }
+
+    // ============ 消息处理 ============
+    function processHostMessage(data) {
+        var patientId = null;
+
+        if (isSmartCareHostMessage(data)) {
+            patientId = extractPatientId(data.patient);
+            if (data.account) cachedAccount = data.account;
+            if (data.token) cachedToken = data.token;
+        } else if (isLegacyPatientMessage(data)) {
+            var legacyPatient = data.patient || data;
+            patientId = extractPatientId(legacyPatient);
+        }
+
+        if (!patientId) return false;
+
+        liveReceived = true;
+        stopHandshake();
+        onPatientChange(patientId, data);
+        return true;
+    }
+
+    function onMessage(event) {
+        if (!isTrustedParentMessage(event)) return;
+
+        var data = event.data;
+        if (!data || typeof data !== 'object') return;
+
+        var type = data.type || '';
+        var recognized = isSmartCareHostMessage(data) || isLegacyPatientMessage(data);
+
+        dbg('收到消息 type=' + type + ' origin=' + event.origin + ' recognized=' + recognized);
+
+        if (recognized) {
+            processHostMessage(data);
+        }
+    }
+
+    // ============ 缓存消息回放 ============
+    function replayCachedMessage() {
+        var cached = window.__scBloodSugarMsg;
+        if (cached && !liveReceived) {
+            dbg('回放缓存消息');
+            processHostMessage(cached);
+        }
+    }
+
+    // ============ 患者切换 ============
+    function onPatientChange(pid, rawData) {
+        if (!pid) {
+            dbg('无效患者ID');
+            return;
+        }
+
+        // 提取患者原始数据用于构建上下文
+        var patientData = null;
+        if (rawData && rawData.patient) {
+            patientData = rawData.patient;
+        } else if (isLegacyPatientMessage(rawData)) {
+            patientData = rawData.patient || rawData;
+        }
+
+        if (currentPatientId === pid) {
+            dbg('相同患者，刷新数据 pid=' + maskId(pid));
+            if (patientData) updatePatientContext(patientData);
+            if (currentPatient && !currentRange) {
+                currentRange = resolveDefaultRange(currentPatient);
+                updateRangeInputs(currentRange);
+            }
+            fetchPatientData(pid, currentRange);
+            return;
+        }
+
+        // 新患者
+        dbg('切换患者 ' + maskId(currentPatientId) + ' -> ' + maskId(pid));
+        if (currentAbortController) currentAbortController.abort();
+        requestVersion++;
+        currentPatientId = pid;
+
+        if (patientData) {
+            currentPatient = buildPatientContext(pid, patientData);
+        } else {
+            currentPatient = { pid: pid };
+        }
+
+        currentRange = resolveDefaultRange(currentPatient);
+        updateRangeInputs(currentRange);
+        clearTable();
+        disableExport();
+        if (patientData) renderPatientInfo(currentPatient);
+        fetchPatientData(pid, currentRange);
+    }
+
+    function maskId(id) {
+        if (!id) return 'null';
+        var s = String(id);
+        if (s.length <= 6) return s;
+        return '...' + s.slice(-6);
+    }
 
     // ============ 初始化 ============
     function init() {
@@ -66,11 +259,29 @@
             if (e.key === 'Escape' && !$steroidDialog.hidden) closeSteroidDialog();
         });
 
-        window.addEventListener('message', onMessage);
-        document.addEventListener('visibilitychange', onVisibilityChange);
-        window.addEventListener('pageshow', onVisibilityChange);
+        // 注册消息监听
+        messageHandler = onMessage;
+        window.addEventListener('message', messageHandler);
 
-        startHandshake();
+        // 生命周期监听
+        visibilityHandler = onVisibilityChange;
+        pageshowHandler = onPageShow;
+        pagehideHandler = cleanup;
+
+        document.addEventListener('visibilitychange', visibilityHandler);
+        window.addEventListener('pageshow', pageshowHandler);
+        window.addEventListener('pagehide', pagehideHandler);
+        window.addEventListener('beforeunload', pagehideHandler);
+
+        dbg('页面初始化完成，当前URL: ' + window.location.href);
+
+        // 先回放缓存消息
+        replayCachedMessage();
+
+        // 如果还没收到宿主消息，开始握手
+        if (!liveReceived) {
+            startHandshake();
+        }
     }
 
     // ============ 调试日志 ============
@@ -82,7 +293,6 @@
         } else {
             console.log(line);
         }
-        // 同时写入页面可见区域，方便调试
         var logEl = document.getElementById('debugLog');
         if (logEl) {
             logEl.textContent += line + '\n';
@@ -90,136 +300,49 @@
         }
     }
 
-    // ============ postMessage 握手 ============
-    function startHandshake() {
-        handshakeAttempts = 0;
-        dbg('页面加载完成，当前URL: ' + window.location.href);
-        dbg('是否在iframe中: ' + (window.self !== window.top));
-        dbg('parent是否可用: ' + (typeof window.parent));
-        dbg('开始握手，发送 SmartCare-form-ready...');
-        sendReadyMessage();
-    }
-
-    function sendReadyMessage() {
-        if (handshakeRetryTimer) clearTimeout(handshakeRetryTimer);
-
-        var msg = { type: 'SmartCare-form-ready', form: 'bloodSugar' };
-        window.parent.postMessage(msg, '*');
-        dbg('第 ' + handshakeAttempts + ' 次发送 ready 消息到 parent');
-
-        handshakeAttempts++;
-        if (handshakeAttempts < MAX_HANDSHAKE_ATTEMPTS) {
-            handshakeRetryTimer = setTimeout(sendReadyMessage, 200);
-        } else {
-            dbg('握手重试已达上限(' + MAX_HANDSHAKE_ATTEMPTS + '次)，父窗口可能未监听 postMessage');
-        }
-    }
-
+    // ============ 生命周期事件 ============
     function onVisibilityChange() {
-        if (document.hidden) return;
-        sendReadyMessage();
-        if (currentPatientId) {
-            fetchPatientData(currentPatientId, currentRange);
+        if (document.visibilityState !== 'visible') return;
+        if (liveReceived) return;
+        dbg('页面恢复可见，重新握手');
+        startHandshake();
+    }
+
+    function onPageShow() {
+        if (liveReceived) return;
+        dbg('pageshow 恢复，重新握手');
+        startHandshake();
+    }
+
+    function cleanup() {
+        stopHandshake();
+        if (currentAbortController) {
+            currentAbortController.abort();
+            currentAbortController = null;
+        }
+        if (messageHandler) {
+            window.removeEventListener('message', messageHandler);
+            messageHandler = null;
+        }
+        if (visibilityHandler) {
+            document.removeEventListener('visibilitychange', visibilityHandler);
+            visibilityHandler = null;
+        }
+        if (pageshowHandler) {
+            window.removeEventListener('pageshow', pageshowHandler);
+            pageshowHandler = null;
+        }
+        if (pagehideHandler) {
+            window.removeEventListener('pagehide', pagehideHandler);
+            window.removeEventListener('beforeunload', pagehideHandler);
+            pagehideHandler = null;
         }
     }
 
-    function onMessage(event) {
-        dbg('收到消息 origin=' + event.origin, event.data);
-
-        if (!isAllowedOrigin(event.origin)) {
-            dbg('❌ origin不匹配，已忽略: ' + event.origin);
-            return;
-        }
-
-        var data = event.data;
-        if (!data || typeof data !== 'object') {
-            dbg('消息非对象，已忽略');
-            return;
-        }
-
-        var type = data.type;
-        dbg('消息type=' + type);
-
-        if (type === 'SmartCare' || type === 'SmartCare-patient-info' || type === 'SmartCare-set-patient') {
-            var patient = data.patient || data;
-            if (!patient) {
-                dbg('消息中无patient字段');
-                return;
-            }
-
-            var pid = extractPatientId(patient);
-            dbg('提取到patientId=' + pid);
-            if (!pid) {
-                dbg('❌ 无法提取有效的patientId');
-                return;
-            }
-
-            if (handshakeRetryTimer) {
-                clearTimeout(handshakeRetryTimer);
-                handshakeRetryTimer = null;
-            }
-
-            dbg('✅ 收到患者: ' + pid);
-            onPatientReceived(pid, patient);
-        } else {
-            dbg('未识别的消息type: ' + type);
-        }
-    }
-
-    function isAllowedOrigin(origin) {
-        if (!origin) return true;
-        for (var i = 0; i < SMARTCARE_ALLOWED_ORIGINS.length; i++) {
-            if (SMARTCARE_ALLOWED_ORIGINS[i] === origin) return true;
-        }
-        if (origin === window.location.origin) return true;
-        return false;
-    }
-
-    function extractPatientId(data) {
-        var patient = data.patient || data;
-        if (!patient) return null;
-
-        var id = patient.id || patient._id || patient.pid || patient.patientId || patient.patientID;
-        if (!id && patient.patient) {
-            id = patient.patient.id || patient.patient._id;
-        }
-        if (id === undefined || id === null) return null;
-
-        var strId = String(id).trim();
-        if (strId === '[object Object]') return null;
-        return strId;
-    }
-
-    // ============ 患者切换 ============
-    function onPatientReceived(pid, patientData) {
-        if (currentPatientId === pid) {
-            // Same patient - update context and refresh
-            updatePatientContext(patientData);
-            var newRange = resolveDefaultRange(currentPatient);
-            if (rangeChanged(currentRange, newRange)) {
-                currentRange = newRange;
-                updateRangeInputs(newRange);
-            }
-            fetchPatientData(pid, currentRange);
-            return;
-        }
-
-        // New patient
-        if (currentAbortController) currentAbortController.abort();
-        requestVersion++;
-        currentPatientId = pid;
-        currentPatient = buildPatientContext(patientData);
-        currentRange = resolveDefaultRange(currentPatient);
-        updateRangeInputs(currentRange);
-        clearTable();
-        disableExport();
-        renderPatientInfo(currentPatient);
-        fetchPatientData(pid, currentRange);
-    }
-
-    function buildPatientContext(data) {
+    // ============ 患者上下文 ============
+    function buildPatientContext(pid, data) {
         return {
-            pid: currentPatientId,
+            pid: pid,
             name: data.name || '',
             mrn: data.mrn || '',
             bedNo: data.bedNo || data.bed || '',
@@ -293,15 +416,13 @@
     }
 
     function getShanghaiDate(date) {
-        var offset = 8 * 60; // Shanghai is UTC+8
+        var offset = 8 * 60;
         var utc = date.getTime() + date.getTimezoneOffset() * 60000;
         return new Date(utc + offset * 60000);
     }
 
     function makeShanghaiDate(year, month, day, hour, minute) {
-        // Create date in Shanghai timezone
         var date = new Date(year, month, day, hour, minute, 0, 0);
-        // Adjust to UTC
         var offset = 8 * 60;
         var utc = date.getTime() - offset * 60000;
         return new Date(utc - date.getTimezoneOffset() * 60000);
@@ -353,14 +474,14 @@
 
     function updateRangeStatus(range) {
         if (!range) {
-            $rangeStatus.textContent = '等待患者信息';
+            setTextContent($rangeStatus, '等待患者信息');
             return;
         }
         var text = formatShanghaiDateTime(range.startTime) + ' 至 ' + formatShanghaiDateTime(range.endTime);
         if (range.defaultReason === 'CURRENT_NURSING_DAY') {
             text += '（当前护理日）';
         }
-        $rangeStatus.textContent = text;
+        setTextContent($rangeStatus, text);
     }
 
     function updateArrowStates() {
@@ -370,7 +491,6 @@
             return;
         }
 
-        // Check if we can shift backward (don't go before admission time)
         var canBack = true;
         if (currentPatient.admissionTime) {
             var startShanghai = getShanghaiDate(new Date(currentRange.startTime));
@@ -380,7 +500,6 @@
             canBack = backStart >= new Date(admShanghai.getFullYear(), admShanghai.getMonth(), admShanghai.getDate());
         }
 
-        // Check if we can shift forward (don't go after discharge time)
         var canForward = true;
         if (currentPatient.dischargeTime) {
             var endShanghai = getShanghaiDate(new Date(currentRange.endTime));
@@ -462,11 +581,10 @@
             url += '?startTime=' + encodeURIComponent(range.startTime) + '&endTime=' + encodeURIComponent(range.endTime);
         }
 
-        dbg('请求血糖数据: ' + url);
+        dbg('请求血糖数据 pid=' + maskId(pid));
 
         fetch(url, { signal: currentAbortController.signal })
             .then(function (response) {
-                dbg('API响应 status=' + response.status);
                 if (!response.ok) {
                     return response.json().then(function (err) {
                         throw new Error(err.error || '请求失败: ' + response.status);
@@ -485,12 +603,10 @@
 
                 var data = result.data;
                 if (!data || !data.patient) {
-                    dbg('返回数据无patient字段');
                     showError('未找到患者信息');
                     return;
                 }
 
-                // Update range from response
                 if (data.range) {
                     currentRange = data.range;
                     updateRangeInputs(currentRange);
@@ -509,11 +625,11 @@
                 }
             })
             .catch(function (err) {
-                if (err.name === 'AbortError') { dbg('请求被abort'); return; }
+                if (err.name === 'AbortError') return;
                 if (requestVersion !== version) return;
                 if (currentPatientId !== pid) return;
                 hideLoading();
-                dbg('❌ 请求失败: ' + err.message);
+                dbg('请求失败: ' + err.message);
                 showError('血糖数据加载失败，请重试');
             });
     }
@@ -540,21 +656,13 @@
             var row = rows[i];
             var tr = document.createElement('tr');
 
-            // 序号
             appendCell(tr, String(i + 1));
-            // 血糖时间
             appendCell(tr, row.time || '--');
-            // 血糖
             appendCell(tr, row.resultDisplay || (row.result != null ? String(row.result) : '--'));
-            // 胰岛素
             appendCell(tr, row.insulin != null ? String(row.insulin) : '--');
-            // 激素当量 (clickable)
             appendClickableSteroidCell(tr, row.steroidFactor, row.drugDetails);
-            // 校正因子
             appendCell(tr, row.correctionFactor != null ? String(row.correctionFactor) : '--');
-            // IRI
             appendIriCell(tr, row.iri);
-            // 激素详情按钮
             appendDetailButtonCell(tr, row.drugDetails);
 
             $tableBody.appendChild(tr);
@@ -663,10 +771,8 @@
 
         if (!currentPatient || !currentRange) return;
 
-        // Build aoa data
         var aoa = [];
 
-        // Header info
         aoa.push(['血糖 IRI 统计']);
         aoa.push([]);
         aoa.push(['床号', currentPatient.bedNo || '--', '姓名', currentPatient.name || '--']);
@@ -677,10 +783,8 @@
         aoa.push(['时区', 'Asia/Shanghai']);
         aoa.push([]);
 
-        // Table header
         aoa.push(['序号', '血糖时间', '血糖（mmol/L）', '胰岛素（U）', '激素当量（mg）', '校正因子', 'IRI', '激素详情']);
 
-        // Table data
         var rows = $tableBody.querySelectorAll('tr');
         for (var i = 0; i < rows.length; i++) {
             var cells = rows[i].querySelectorAll('td');

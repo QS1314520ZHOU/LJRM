@@ -102,6 +102,54 @@
         </div>
     </div>
 
+    <!-- SmartCare 早期握手脚本：在 blood-sugar.js 加载前注册 message 监听并缓存宿主消息 -->
+    <script>
+      (function () {
+        window.__scBloodSugarMsg = null;
+
+        function isValidSmartCareMessage(data) {
+          if (!data || typeof data !== 'object') return false;
+          if (data.type !== 'SmartCare') return false;
+          var patient = data.patient;
+          if (!patient || typeof patient !== 'object') return false;
+          // 验证能提取非空患者ID
+          var id = patient.id || patient._id || patient.pid || patient.patientId || patient.patientID;
+          if (!id && patient.patient) {
+            id = patient.patient.id || patient.patient._id;
+          }
+          if (!id) return false;
+          var strId = String(id).trim();
+          return strId !== '' && strId !== '[object Object]';
+        }
+
+        function onEarlyMessage(event) {
+          if (event.source !== window.parent) return;
+          var data = event.data;
+          if (!isValidSmartCareMessage(data)) return;
+          window.__scBloodSugarMsg = data;
+        }
+
+        window.addEventListener('message', onEarlyMessage);
+
+        // 向 parent 发送 SmartCareReady
+        function postEarlyReady() {
+          try {
+            window.parent.postMessage({ type: 'SmartCareReady' }, '*');
+          } catch (e) { /* 不阻止页面初始化 */ }
+        }
+
+        // 立即发送一次
+        postEarlyReady();
+
+        // window load 时补发一次
+        window.addEventListener('load', function () {
+          if (!window.__scBloodSugarMsg) {
+            postEarlyReady();
+          }
+        });
+      })();
+    </script>
+
     <!-- 调试状态栏 -->
     <div id="debugStatusBar" style="position:fixed;top:0;left:0;right:0;background:#1e293b;color:#22d3ee;font:12px/1.4 monospace;z-index:9999;padding:4px 12px;display:flex;align-items:center;gap:12px;">
       <span>🔍</span>
@@ -117,14 +165,12 @@
           origLog.apply(console, arguments);
           count++;
           var text = arguments[0] || '';
-          // 只取最新一行显示
           var short = String(text).replace(/^\[[^\]]+\]\s*/, '').substring(0, 80);
           var el = document.getElementById('debugStatusText');
           if (el) el.textContent = short;
           var cnt = document.getElementById('debugCount');
           if (cnt) cnt.textContent = count + '条日志 (F12查看完整)';
         };
-        // 页面加载后更新状态
         window.addEventListener('load', function(){
           var el = document.getElementById('debugStatusText');
           if (el) el.textContent = '页面已加载，等待握手...';
