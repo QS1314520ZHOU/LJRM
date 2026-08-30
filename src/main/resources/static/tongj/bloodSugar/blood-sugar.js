@@ -25,15 +25,6 @@
     var $error = document.getElementById('error');
     var $empty = document.getElementById('empty');
     var $tableContainer = document.getElementById('tableContainer');
-    var $patientInfo = document.getElementById('patientInfo');
-    var $patientName = document.getElementById('patientName');
-    var $patientMrn = document.getElementById('patientMrn');
-    var $patientBed = document.getElementById('patientBed');
-    var $patientGender = document.getElementById('patientGender');
-    var $patientAge = document.getElementById('patientAge');
-    var $patientAdmissionTime = document.getElementById('patientAdmissionTime');
-    var $patientDischargeTime = document.getElementById('patientDischargeTime');
-    var $patientStatus = document.getElementById('patientStatus');
     var $tableBody = document.getElementById('tableBody');
     var $btnExport = document.getElementById('btnExport');
     var $btnRefresh = document.getElementById('btnRefresh');
@@ -179,7 +170,6 @@
         hideLoading();
         hideEmpty();
 
-        if ($patientInfo) $patientInfo.hidden = true;
         if ($startTime) $startTime.value = '';
         if ($endTime) $endTime.value = '';
 
@@ -301,7 +291,6 @@
         updateRangeInputs(currentRange);
         clearTable();
         disableExport();
-        if (patientData) renderPatientInfo(currentPatient);
         fetchPatientData(pid, currentRange);
     }
 
@@ -477,7 +466,6 @@
         currentPatient.admissionTime = data.admissionTime || data.inTime || data.inIcuTime || data.icuInTime || data.enterTime || currentPatient.admissionTime;
         currentPatient.dischargeTime = data.dischargeTime || data.outTime || data.outIcuTime || data.icuOutTime || data.leaveTime || currentPatient.dischargeTime;
         currentPatient.discharged = isDischarged(data) || currentPatient.discharged;
-        renderPatientInfo(currentPatient);
     }
 
     function rangeChanged(r1, r2) {
@@ -734,8 +722,6 @@
                     updateRangeInputs(currentRange);
                 }
 
-                renderPatientInfo(data.patient);
-
                 dbg('获取到 ' + (data.rows ? data.rows.length : 0) + ' 条血糖记录');
 
                 if (!data.rows || data.rows.length === 0) {
@@ -757,18 +743,6 @@
     }
 
     // ============ 渲染 ============
-    function renderPatientInfo(patient) {
-        setTextContent($patientBed, patient.bedNo || '--');
-        setTextContent($patientName, patient.name || '--');
-        setTextContent($patientMrn, patient.mrn || '--');
-        setTextContent($patientGender, patient.gender || '--');
-        setTextContent($patientAge, patient.age || '--');
-        setTextContent($patientAdmissionTime, formatShanghaiDateTime(patient.admissionTime));
-        setTextContent($patientDischargeTime, formatShanghaiDateTime(patient.dischargeTime));
-        setTextContent($patientStatus, patient.discharged ? '已出科' : '在科');
-        $patientInfo.hidden = false;
-    }
-
     function renderTable(rows) {
         while ($tableBody.firstChild) {
             $tableBody.removeChild($tableBody.firstChild);
