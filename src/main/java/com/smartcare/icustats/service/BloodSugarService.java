@@ -187,10 +187,14 @@ public class BloodSugarService {
         Date queryEnd = new Date(maxTime.getTime() + 24L * 60 * 60 * 1000);
 
         // Single batch query for all steroids
+        // 匹配根级别 name 或 drugList 数组中的 name
         Query query = new Query();
         query.addCriteria(Criteria.where("pid").is(pid));
         query.addCriteria(Criteria.where("startTime").gte(queryStart).lt(queryEnd));
-        query.addCriteria(Criteria.where("name").regex(STEROID_PATTERN));
+        query.addCriteria(new Criteria().orOperator(
+                Criteria.where("name").regex(STEROID_PATTERN),
+                Criteria.where("drugList.name").regex(STEROID_PATTERN)
+        ));
         query.addCriteria(Criteria.where("status").nin("invalid", "cancel", "cancelled", "revoke", "revoked", 99, -1));
         query.with(org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.ASC, "startTime"));
 
