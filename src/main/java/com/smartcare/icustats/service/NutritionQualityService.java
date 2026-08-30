@@ -483,12 +483,12 @@ public class NutritionQualityService {
         Map<String, Object> meta = NutritionQualityIndicatorConfig.findByKey("feedingTubeUnplannedRemovalRate");
         NutritionQualityIndicator indicator = createIndicatorFromMeta(meta);
 
-        // 使用 tubeExe 数据 - 简化实现
-        indicator.setTotal(NutritionQualityCell.mappingRequired("tubeExe.unplannedRemoval"));
+        indicator.setTotal(calcService.calcUnplannedRemovalRate(records));
 
         Map<String, NutritionQualityCell> monthly = new LinkedHashMap<>();
+        Map<String, List<Document>> byMonth = calcService.groupByMonth(records);
         for (String month : months) {
-            monthly.put(month, NutritionQualityCell.mappingRequired("tubeExe.unplannedRemoval"));
+            monthly.put(month, calcService.calcUnplannedRemovalRate(byMonth.getOrDefault(month, Collections.emptyList())));
         }
         indicator.setMonthly(monthly);
 
@@ -502,8 +502,9 @@ public class NutritionQualityService {
         indicator.setTotal(calcService.calcSkinProblemRate(records));
 
         Map<String, NutritionQualityCell> monthly = new LinkedHashMap<>();
+        Map<String, List<Document>> byMonth = calcService.groupByMonth(records);
         for (String month : months) {
-            monthly.put(month, calcService.calcSkinProblemRate(Collections.emptyList()));
+            monthly.put(month, calcService.calcSkinProblemRate(byMonth.getOrDefault(month, Collections.emptyList())));
         }
         indicator.setMonthly(monthly);
 
@@ -517,8 +518,9 @@ public class NutritionQualityService {
         indicator.setTotal(calcService.calcAspirationRate(records));
 
         Map<String, NutritionQualityCell> monthly = new LinkedHashMap<>();
+        Map<String, List<Document>> byMonth = calcService.groupByMonth(records);
         for (String month : months) {
-            monthly.put(month, calcService.calcAspirationRate(Collections.emptyList()));
+            monthly.put(month, calcService.calcAspirationRate(byMonth.getOrDefault(month, Collections.emptyList())));
         }
         indicator.setMonthly(monthly);
 

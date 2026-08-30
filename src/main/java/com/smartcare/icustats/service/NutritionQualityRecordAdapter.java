@@ -581,6 +581,34 @@ public class NutritionQualityRecordAdapter {
         return NumberUtils.normalizeText(doc.get(field));
     }
 
+    // ════════════════════════════════════════════════════════════════════
+    // 复合指标判断（备注关键词 + 并发症勾选）
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * 指标4: 非计划拔管 = 备注含"拔管" 且 机械性并发症="√"
+     */
+    public boolean isUnplannedExtubation(Document doc) {
+        String remark = getRemark(doc);
+        return remark.contains("拔管") && hasMechanicalComplication(doc);
+    }
+
+    /**
+     * 指标5: 喂养管皮肤问题 = 备注含"皮肤" 且 机械性并发症="√"
+     */
+    public boolean isTubeSkinProblem(Document doc) {
+        String remark = getRemark(doc);
+        return remark.contains("皮肤") && hasMechanicalComplication(doc);
+    }
+
+    /**
+     * 指标6: 误吸 = 备注含"误吸" 且 机械性并发症="√"
+     */
+    public boolean isAspiration(Document doc) {
+        String remark = getRemark(doc);
+        return remark.contains("误吸") && hasMechanicalComplication(doc);
+    }
+
     /**
      * 获取科室代码
      */

@@ -297,33 +297,95 @@ public class NutritionQualityCalculationService {
 
     /**
      * 计算喂养管非计划拔除发生率
-     * 使用 tubeExe 数据（需要外部提供）
+     * 条件: 备注含"拔管" 且 机械性并发症="√"
+     * 分子: 按患者去重，只要任意一条记录满足条件即计入
+     * 分母: 有效记录数（按patient+day去重）
      */
-    public NutritionQualityCell calcUnplannedRemovalRate(int unplannedCount, int tubeDays) {
-        if (tubeDays <= 0) return NutritionQualityCell.noData();
+    public NutritionQualityCell calcUnplannedRemovalRate(List<Document> records) {
+        if (records.isEmpty()) return NutritionQualityCell.noData();
 
-        double rate = unplannedCount * 100.0 / tubeDays;
+        Map<String, Document> latestByPatientDay = new LinkedHashMap<>();
+        for (Document record : records) {
+            if (!adapter.isValidRecord(record)) continue;
+            String pid = adapter.getPid(record);
+            Date time = adapter.getRecordTime(record);
+            if (pid.isEmpty() || time == null) continue;
+            String key = pid + "::" + toShanghaiDate(time);
+            latestByPatientDay.put(key, record);
+        }
+
+        int denominator = latestByPatientDay.size();
+        if (denominator == 0) return NutritionQualityCell.noData();
+
+        long numerator = latestByPatientDay.values().stream()
+                .filter(adapter::isUnplannedExtubation)
+                .count();
+
+        double rate = numerator * 100.0 / denominator;
         boolean compliant = rate < 3.0;
-        return NutritionQualityCell.ok(unplannedCount, tubeDays,
+        return NutritionQualityCell.ok((int) numerator, denominator,
                 BigDecimal.valueOf(rate).setScale(2, RoundingMode.HALF_UP).doubleValue(), compliant);
     }
 
     /**
      * 计算喂养管相关皮肤问题发生率
-     * 需要对应字段映射
+     * 条件: 备注含"皮肤" 且 机械性并发症="√"
      */
     public NutritionQualityCell calcSkinProblemRate(List<Document> records) {
-        // 皮肤问题字段待确认
-        return NutritionQualityCell.mappingRequired("skinProblem");
+        if (records.isEmpty()) return NutritionQualityCell.noData();
+
+        Map<String, Document> latestByPatientDay = new LinkedHashMap<>();
+        for (Document record : records) {
+            if (!adapter.isValidRecord(record)) continue;
+            String pid = adapter.getPid(record);
+            Date time = adapter.getRecordTime(record);
+            if (pid.isEmpty() || time == null) continue;
+            String key = pid + "::" + toShanghaiDate(time);
+            latestByPatientDay.put(key, record);
+        }
+
+        int denominator = latestByPatientDay.size();
+        if (denominator == 0) return NutritionQualityCell.noData();
+
+        long numerator = latestByPatientDay.values().stream()
+                .filter(adapter::isTubeSkinProblem)
+                .count();
+
+        // 皮肤问题发生率目标12%，当前仅作展示
+        double rate = numerator * 100.0 / denominator;
+        boolean compliant = rate <= 12.0;
+        return NutritionQualityCell.ok((int) numerator, denominator,
+                BigDecimal.valueOf(rate).setScale(2, RoundingMode.HALF_UP).doubleValue(), compliant);
     }
 
     /**
      * 计算误吸发生率
-     * 需要对应字段映射
+     * 条件: 备注含"误吸" 且 机械性并发症="√"
      */
     public NutritionQualityCell calcAspirationRate(List<Document> records) {
-        // 误吸字段待确认
-        return NutritionQualityCell.mappingRequired("aspiration");
+        if (records.isEmpty()) return NutritionQualityCell.noData();
+
+        Map<String, Document> latestByPatientDay = new LinkedHashMap<>();
+        for (Document record : records) {
+            if (!adapter.isValidRecord(record)) continue;
+            String pid = adapter.getPid(record);
+            Date time = adapter.getRecordTime(record);
+            if (pid.isEmpty() || time == null) continue;
+            String key = pid + "::" + toShanghaiDate(time);
+            latestByPatientDay.put(key, record);
+        }
+
+        int denominator = latestByPatientDay.size();
+        if (denominator == 0) return NutritionQualityCell.noData();
+
+        long numerator = latestByPatientDay.values().stream()
+                .filter(adapter::isAspiration)
+                .count();
+
+        double rate = numerator * 100.0 / denominator;
+        boolean compliant = rate < 5.0;
+        return NutritionQualityCell.ok((int) numerator, denominator,
+                BigDecimal.valueOf(rate).setScale(2, RoundingMode.HALF_UP).doubleValue(), compliant);
     }
 
     /**
@@ -570,6 +632,36 @@ public class NutritionQualityCalculationService {
                     reason.append("机械性并发症为" + properties.getCheckedValue() + "，计入分子");
                 } else {
                     reason.append("无机械性并发症，不计入分子");
+                }
+                break;
+
+            case "feedingTubeUnplannedRemovalRate":
+                if (adapter.isUnplannedExtubation(record)) {
+                    reason.append("备注含\"拔管\"且机械性并发症为" + properties.getCheckedValue() + "，计入分子");
+                } else if (!adapter.hasMechanicalComplication(record)) {
+                    reason.append("未勾选机械性并发症，不计入分子");
+                } else {
+                    reason.append("备注不含\"拔管\"，不计入分子");
+                }
+                break;
+
+            case "feedingTubeSkinProblemRate":
+                if (adapter.isTubeSkinProblem(record)) {
+                    reason.append("备注含\"皮肤\"且机械性并发症为" + properties.getCheckedValue() + "，计入分子");
+                } else if (!adapter.hasMechanicalComplication(record)) {
+                    reason.append("未勾选机械性并发症，不计入分子");
+                } else {
+                    reason.append("备注不含\"皮肤\"，不计入分子");
+                }
+                break;
+
+            case "aspirationRate":
+                if (adapter.isAspiration(record)) {
+                    reason.append("备注含\"误吸\"且机械性并发症为" + properties.getCheckedValue() + "，计入分子");
+                } else if (!adapter.hasMechanicalComplication(record)) {
+                    reason.append("未勾选机械性并发症，不计入分子");
+                } else {
+                    reason.append("备注不含\"误吸\"，不计入分子");
                 }
                 break;
 

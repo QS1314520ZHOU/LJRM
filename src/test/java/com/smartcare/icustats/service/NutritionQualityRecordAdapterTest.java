@@ -255,6 +255,67 @@ class NutritionQualityRecordAdapterTest {
     }
 
     // ════════════════════════════════════════════════════════════════════
+    // 复合指标判断（备注关键词 + 并发症勾选）
+    // ════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class CompositeIndicatorTest {
+        @Test
+        void unplannedExtubation_remarkContains拔管AndComplication_returnsTrue() {
+            Document doc = new Document("jxx", "√").append("bz", "非计划拔管");
+            assertTrue(adapter.isUnplannedExtubation(doc));
+        }
+
+        @Test
+        void unplannedExtubation_remarkNo拔管_returnsFalse() {
+            Document doc = new Document("jxx", "√").append("bz", "正常");
+            assertFalse(adapter.isUnplannedExtubation(doc));
+        }
+
+        @Test
+        void unplannedExtubation_noComplication_returnsFalse() {
+            Document doc = new Document("jxx", "×").append("bz", "非计划拔管");
+            assertFalse(adapter.isUnplannedExtubation(doc));
+        }
+
+        @Test
+        void tubeSkinProblem_remarkContains皮肤AndComplication_returnsTrue() {
+            Document doc = new Document("jxx", "√").append("bz", "皮肤发红");
+            assertTrue(adapter.isTubeSkinProblem(doc));
+        }
+
+        @Test
+        void tubeSkinProblem_remarkNo皮肤_returnsFalse() {
+            Document doc = new Document("jxx", "√").append("bz", "正常");
+            assertFalse(adapter.isTubeSkinProblem(doc));
+        }
+
+        @Test
+        void tubeSkinProblem_noComplication_returnsFalse() {
+            Document doc = new Document("jxx", "×").append("bz", "皮肤发红");
+            assertFalse(adapter.isTubeSkinProblem(doc));
+        }
+
+        @Test
+        void aspiration_remarkContains误吸AndComplication_returnsTrue() {
+            Document doc = new Document("jxx", "√").append("bz", "发生误吸");
+            assertTrue(adapter.isAspiration(doc));
+        }
+
+        @Test
+        void aspiration_remarkNo误吸_returnsFalse() {
+            Document doc = new Document("jxx", "√").append("bz", "正常");
+            assertFalse(adapter.isAspiration(doc));
+        }
+
+        @Test
+        void aspiration_noComplication_returnsFalse() {
+            Document doc = new Document("jxx", "×").append("bz", "发生误吸");
+            assertFalse(adapter.isAspiration(doc));
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
     // 管道通畅和冲管
     // ════════════════════════════════════════════════════════════════════
 

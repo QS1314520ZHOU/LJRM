@@ -433,6 +433,127 @@ class NutritionQualityCalculationServiceTest {
     }
 
     // ════════════════════════════════════════════════════════════════════
+    // calcUnplannedRemovalRate — 备注含"拔管" + 机械性并发症
+    // ════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class UnplannedRemovalRateTest {
+        @Test
+        void emptyRecords_returnsNoData() {
+            NutritionQualityCell cell = calcService.calcUnplannedRemovalRate(Collections.emptyList());
+            assertEquals("no_data", cell.getDataStatus());
+        }
+
+        @Test
+        void remarkWith拔管AndComplication_counted() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document doc = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("jxx", "√")
+                    .append("bz", "非计划拔管");
+
+            NutritionQualityCell cell = calcService.calcUnplannedRemovalRate(Collections.singletonList(doc));
+            assertEquals("ok", cell.getDataStatus());
+            assertEquals(1, cell.getNumerator());
+            assertEquals(1, cell.getDenominator());
+        }
+
+        @Test
+        void remarkWith拔管NoComplication_notCounted() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document doc = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("jxx", "×")
+                    .append("bz", "非计划拔管");
+
+            NutritionQualityCell cell = calcService.calcUnplannedRemovalRate(Collections.singletonList(doc));
+            assertEquals(0, cell.getNumerator());
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // calcSkinProblemRate — 备注含"皮肤" + 机械性并发症
+    // ════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class SkinProblemRateTest {
+        @Test
+        void emptyRecords_returnsNoData() {
+            NutritionQualityCell cell = calcService.calcSkinProblemRate(Collections.emptyList());
+            assertEquals("no_data", cell.getDataStatus());
+        }
+
+        @Test
+        void remarkWith皮肤AndComplication_counted() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document doc = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("jxx", "√")
+                    .append("bz", "皮肤发红");
+
+            NutritionQualityCell cell = calcService.calcSkinProblemRate(Collections.singletonList(doc));
+            assertEquals("ok", cell.getDataStatus());
+            assertEquals(1, cell.getNumerator());
+        }
+
+        @Test
+        void remarkWith皮肤NoComplication_notCounted() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document doc = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("jxx", "×")
+                    .append("bz", "皮肤发红");
+
+            NutritionQualityCell cell = calcService.calcSkinProblemRate(Collections.singletonList(doc));
+            assertEquals(0, cell.getNumerator());
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // calcAspirationRate — 备注含"误吸" + 机械性并发症
+    // ════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class AspirationRateTest {
+        @Test
+        void emptyRecords_returnsNoData() {
+            NutritionQualityCell cell = calcService.calcAspirationRate(Collections.emptyList());
+            assertEquals("no_data", cell.getDataStatus());
+        }
+
+        @Test
+        void remarkWith误吸AndComplication_counted() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document doc = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("jxx", "√")
+                    .append("bz", "发生误吸");
+
+            NutritionQualityCell cell = calcService.calcAspirationRate(Collections.singletonList(doc));
+            assertEquals("ok", cell.getDataStatus());
+            assertEquals(1, cell.getNumerator());
+        }
+
+        @Test
+        void remarkWith误吸NoComplication_notCounted() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document doc = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("jxx", "×")
+                    .append("bz", "发生误吸");
+
+            NutritionQualityCell cell = calcService.calcAspirationRate(Collections.singletonList(doc));
+            assertEquals(0, cell.getNumerator());
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
     // calcEnteralParenteralRatio
     // ════════════════════════════════════════════════════════════════════
 
