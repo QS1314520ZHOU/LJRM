@@ -688,18 +688,34 @@
 
         fetch(url, { signal: currentAbortController.signal })
             .then(function (response) {
-                if (!response.ok) {
-                    return response.text().then(function (text) {
+                return response.text().then(function (text) {
+                    var parsed = { ok: response.ok, status: response.status, body: null, parseError: false };
+                    if (text) {
                         try {
-                            var err = JSON.parse(text);
-                            throw new Error(err.error || err.msg || '服务器错误: ' + response.status);
-                        } catch (parseErr) {
-                            if (parseErr.message && parseErr.message !== text) throw parseErr;
-                            throw new Error('服务器错误: ' + response.status);
+                            parsed.body = JSON.parse(text);
+                        } catch (e) {
+                            parsed.parseError = true;
                         }
-                    });
+                    }
+                    return parsed;
+                });
+            })
+            .then(function (parsed) {
+                if (!parsed.ok) {
+                    var body = parsed.body || {};
+                    var message =
+                        body.error ||
+                        body.msg ||
+                        body.message ||
+                        ('请求失败（HTTP ' + parsed.status + '）');
+                    throw new Error(message);
                 }
-                return response.json();
+
+                if (parsed.parseError || !parsed.body) {
+                    throw new Error('服务器返回格式异常');
+                }
+
+                return parsed.body;
             })
             .then(function (result) {
                 if (requestVersion !== version) return;

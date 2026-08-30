@@ -9,6 +9,8 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import javax.servlet.http.HttpServletResponse;
+
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -31,12 +33,14 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiResponse<Void>> handleGeneral(Exception e) {
-        String message = e.getMessage();
-        if (message == null) message = "服务器异常";
-        int status = message.contains("格式") || message.contains("缺失") || message.contains("不能")
-                || message.contains("超过") || message.contains("不支持") ? 400 : 500;
-        if (status == 500) log.error("Server error", e);
-        return ResponseEntity.status(status).body(ApiResponse.error(status, message));
+    public ResponseEntity<ApiResponse<Void>> handleGeneral(Exception e, HttpServletResponse response) {
+        log.error("Server error", e);
+
+        if (response.isCommitted()) {
+            return null;
+        }
+
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(ApiResponse.error(500, "服务器内部错误"));
     }
 }
