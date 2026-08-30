@@ -102,24 +102,33 @@
         </div>
     </div>
 
-    <!-- 调试日志面板 -->
-    <div id="debugPanel" style="position:fixed;bottom:0;left:0;right:0;background:#1e293b;color:#22d3ee;font:12px/1.4 monospace;z-index:9999;max-height:160px;overflow:hidden;border-top:2px solid #0ea5e9;">
-      <div style="padding:4px 8px;background:#0f172a;cursor:pointer;display:flex;justify-content:space-between;" onclick="var p=document.getElementById('debugPanel');p.style.maxHeight=p.style.maxHeight==='160px'?'0px':'160px';">
-        <span>🔍 调试日志 (点击展开/收起)</span>
-        <span id="logCount"></span>
-      </div>
-      <pre id="debugLog" style="margin:0;padding:8px;overflow:auto;max-height:130px;white-space:pre-wrap;"></pre>
+    <!-- 调试状态栏 -->
+    <div id="debugStatusBar" style="position:fixed;top:0;left:0;right:0;background:#1e293b;color:#22d3ee;font:12px/1.4 monospace;z-index:9999;padding:4px 12px;display:flex;align-items:center;gap:12px;">
+      <span>🔍</span>
+      <span id="debugStatusText">初始化中...</span>
+      <span id="debugCount" style="color:#64748b;margin-left:auto;"></span>
     </div>
     <script>
+      // 调试状态栏 + console.log 同步
       (function(){
+        var origLog = console.log;
         var count = 0;
-        var observer = new MutationObserver(function(){
+        console.log = function() {
+          origLog.apply(console, arguments);
           count++;
-          var el = document.getElementById('logCount');
-          if(el) el.textContent = count + '条';
+          var text = arguments[0] || '';
+          // 只取最新一行显示
+          var short = String(text).replace(/^\[[^\]]+\]\s*/, '').substring(0, 80);
+          var el = document.getElementById('debugStatusText');
+          if (el) el.textContent = short;
+          var cnt = document.getElementById('debugCount');
+          if (cnt) cnt.textContent = count + '条日志 (F12查看完整)';
+        };
+        // 页面加载后更新状态
+        window.addEventListener('load', function(){
+          var el = document.getElementById('debugStatusText');
+          if (el) el.textContent = '页面已加载，等待握手...';
         });
-        var log = document.getElementById('debugLog');
-        if(log) observer.observe(log, {childList:true, characterData:true, subtree:true});
       })();
     </script>
 
