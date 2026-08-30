@@ -1630,11 +1630,11 @@ public class QualityService {
         List<String> pids = patients.stream().map(p -> String.valueOf(p.get("_id"))).collect(Collectors.toList());
         if (pids.isEmpty()) return Collections.emptyMap();
 
-        List<Document> scores = smartCareMongo.find(
-                new Query(Criteria.where("pid").in(pids)
-                        .and("scoreType").is("apacheII")
-                        .and("valid").is(true)),
-                Document.class, CollectionConstants.SCORE);
+        Query scoreQuery = new Query(Criteria.where("pid").in(pids)
+                .and("scoreType").is("apacheII")
+                .and("valid").is(true));
+        scoreQuery.with(Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "time"));
+        List<Document> scores = smartCareMongo.find(scoreQuery, Document.class, CollectionConstants.SCORE);
 
         Map<String, List<Document>> grouped = new LinkedHashMap<>();
         for (Document score : scores) {
@@ -1655,11 +1655,11 @@ public class QualityService {
         List<String> pids = patients.stream().map(p -> String.valueOf(p.get("_id"))).collect(Collectors.toList());
         if (pids.isEmpty()) return Collections.emptyMap();
 
-        List<Document> scores = smartCareMongo.find(
-                new Query(Criteria.where("pid").in(pids)
-                        .and("scoreType").is("apacheII")
-                        .and("valid").is(true)),
-                Document.class, CollectionConstants.SCORE);
+        Query scoreQuery = new Query(Criteria.where("pid").in(pids)
+                .and("scoreType").is("apacheII")
+                .and("valid").is(true));
+        scoreQuery.with(Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "time"));
+        List<Document> scores = smartCareMongo.find(scoreQuery, Document.class, CollectionConstants.SCORE);
 
         Map<String, Document> result = new LinkedHashMap<>();
         for (Document score : scores) {
