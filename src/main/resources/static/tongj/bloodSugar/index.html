@@ -105,31 +105,54 @@
     <!-- SmartCare 早期握手脚本：在 blood-sugar.js 加载前注册 message 监听并缓存宿主消息 -->
     <script>
       (function () {
-        window.__scBloodSugarMsg = null;
+        'use strict';
 
-        function isValidSmartCareMessage(data) {
-          if (!data || typeof data !== 'object') return false;
-          if (data.type !== 'SmartCare') return false;
-          var patient = data.patient;
-          if (!patient || typeof patient !== 'object') return false;
-          // 验证能提取非空患者ID
-          var id = patient.id || patient._id || patient.pid || patient.patientId || patient.patientID;
+        window.__scBloodSugarMsg = null;
+        window.__scBloodSugarEarlyMessageHandler = null;
+
+        function extractEarlyPatientId(patient) {
+          if (!patient || typeof patient !== 'object') return null;
+
+          var id =
+            patient.id ||
+            patient._id ||
+            patient.pid ||
+            patient.patientId ||
+            patient.patientID;
+
           if (!id && patient.patient) {
             id = patient.patient.id || patient.patient._id;
           }
-          if (!id) return false;
-          var strId = String(id).trim();
-          return strId !== '' && strId !== '[object Object]';
+
+          if (id === undefined || id === null) return null;
+
+          var value = String(id).trim();
+          if (!value || value === '[object Object]') return null;
+          return value;
+        }
+
+        function isCacheableSmartCareMessage(data) {
+          if (!data || typeof data !== 'object') return false;
+          if (data.type !== 'SmartCare') return false;
+          if (!data.patient || typeof data.patient !== 'object') return false;
+
+          // invalid消息也需要缓存，正式脚本需要收到它并清空当前患者
+          if (String(data.patient.status || '').trim().toLowerCase() === 'invalid') {
+            return true;
+          }
+
+          return !!extractEarlyPatientId(data.patient);
         }
 
         function onEarlyMessage(event) {
-          if (event.source !== window.parent) return;
-          var data = event.data;
-          if (!isValidSmartCareMessage(data)) return;
-          window.__scBloodSugarMsg = data;
+          if (!event || event.source !== window.parent) return;
+          if (!isCacheableSmartCareMessage(event.data)) return;
+          window.__scBloodSugarMsg = event.data;
         }
 
-        window.addEventListener('message', onEarlyMessage);
+        // 保存早期监听器引用，供 blood-sugar.js 初始化后移除
+        window.__scBloodSugarEarlyMessageHandler = onEarlyMessage;
+        window.addEventListener('message', window.__scBloodSugarEarlyMessageHandler);
 
         // 向 parent 发送 SmartCareReady
         function postEarlyReady() {

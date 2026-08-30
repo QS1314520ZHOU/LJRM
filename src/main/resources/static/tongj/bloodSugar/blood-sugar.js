@@ -18,6 +18,7 @@
     var visibilityHandler = null;
     var pageshowHandler = null;
     var pagehideHandler = null;
+    var beforeUnloadHandler = null;
 
     // ============ DOM 元素 ============
     var $loading = document.getElementById('loading');
@@ -88,13 +89,30 @@
     }
 
     // ============ 消息验证 ============
-    function isSmartCareHostMessage(data) {
-        if (!data || typeof data !== 'object') return false;
-        if (data.type !== 'SmartCare') return false;
-        var patient = data.patient;
+    /**
+     * 判断是否为SmartCare宿主消息信封。
+     * 不要求患者ID存在，因为status=invalid的消息可能没有患者ID。
+     */
+    function isSmartCareEnvelope(data) {
+        return !!data &&
+            typeof data === 'object' &&
+            data.type === 'SmartCare' &&
+            !!data.patient &&
+            typeof data.patient === 'object';
+    }
+
+    /**
+     * 判断宿主发送的患者是否无效。
+     */
+    function isInvalidPatient(patient) {
         if (!patient || typeof patient !== 'object') return false;
-        var pid = extractPatientId(patient);
-        return !!pid;
+        return String(patient.status || '').trim().toLowerCase() === 'invalid';
+    }
+
+    function isSmartCareHostMessage(data) {
+        if (!isSmartCareEnvelope(data)) return false;
+        if (isInvalidPatient(data.patient)) return false;
+        return !!extractPatientId(data.patient);
     }
 
     function isLegacyPatientMessage(data) {
@@ -141,17 +159,71 @@
         }
     }
 
+    // ============ 无效患者处理 ============
+    function handleInvalidPatient() {
+        liveReceived = true;
+        stopHandshake();
+
+        if (currentAbortController) {
+            currentAbortController.abort();
+            currentAbortController = null;
+        }
+
+        requestVersion++;
+        currentPatientId = null;
+        currentPatient = null;
+        currentRange = null;
+
+        clearTable();
+        disableExport();
+        hideLoading();
+        hideEmpty();
+
+        if ($patientInfo) $patientInfo.hidden = true;
+        if ($startTime) $startTime.value = '';
+        if ($endTime) $endTime.value = '';
+
+        setTextContent($rangeStatus, '当前未选择有效患者');
+        showError('当前未选择有效患者');
+        dbg('收到无效患者状态，已清空当前患者');
+    }
+
+    // ============ 早期监听器移除 ============
+    function removeEarlyMessageHandler() {
+        var earlyHandler = window.__scBloodSugarEarlyMessageHandler;
+        if (earlyHandler) {
+            window.removeEventListener('message', earlyHandler);
+        }
+        window.__scBloodSugarEarlyMessageHandler = null;
+    }
+
     // ============ 消息处理 ============
     function processHostMessage(data) {
+        var patient = null;
         var patientId = null;
 
-        if (isSmartCareHostMessage(data)) {
-            patientId = extractPatientId(data.patient);
+        if (isSmartCareEnvelope(data)) {
+            patient = data.patient;
+
+            if (isInvalidPatient(patient)) {
+                handleInvalidPatient();
+                return true;
+            }
+
+            patientId = extractPatientId(patient);
             if (data.account) cachedAccount = data.account;
             if (data.token) cachedToken = data.token;
         } else if (isLegacyPatientMessage(data)) {
-            var legacyPatient = data.patient || data;
-            patientId = extractPatientId(legacyPatient);
+            patient = data.patient || data;
+
+            if (isInvalidPatient(patient)) {
+                handleInvalidPatient();
+                return true;
+            }
+
+            patientId = extractPatientId(patient);
+        } else {
+            return false;
         }
 
         if (!patientId) return false;
@@ -168,10 +240,9 @@
         var data = event.data;
         if (!data || typeof data !== 'object') return;
 
-        var type = data.type || '';
-        var recognized = isSmartCareHostMessage(data) || isLegacyPatientMessage(data);
+        var recognized = isSmartCareEnvelope(data) || isLegacyPatientMessage(data);
 
-        dbg('收到消息 type=' + type + ' origin=' + event.origin + ' recognized=' + recognized);
+        dbg('收到消息 type=' + String(data.type || '') + ' origin=' + event.origin + ' recognized=' + recognized);
 
         if (recognized) {
             processHostMessage(data);
@@ -185,6 +256,8 @@
             dbg('回放缓存消息');
             processHostMessage(cached);
         }
+        // 回放完成后清空，避免长期保留患者、账号和token对象
+        window.__scBloodSugarMsg = null;
     }
 
     // ============ 患者切换 ============
@@ -194,7 +267,6 @@
             return;
         }
 
-        // 提取患者原始数据用于构建上下文
         var patientData = null;
         if (rawData && rawData.patient) {
             patientData = rawData.patient;
@@ -203,13 +275,13 @@
         }
 
         if (currentPatientId === pid) {
-            dbg('相同患者，刷新数据 pid=' + maskId(pid));
+            dbg('重复患者消息，忽略重复请求 pid=' + maskId(pid));
+            // 允许更新宿主传来的患者基本资料，但不触发接口请求
             if (patientData) updatePatientContext(patientData);
             if (currentPatient && !currentRange) {
                 currentRange = resolveDefaultRange(currentPatient);
                 updateRangeInputs(currentRange);
             }
-            fetchPatientData(pid, currentRange);
             return;
         }
 
@@ -259,24 +331,28 @@
             if (e.key === 'Escape' && !$steroidDialog.hidden) closeSteroidDialog();
         });
 
-        // 注册消息监听
+        // 注册正式消息监听（必须先于缓存回放）
         messageHandler = onMessage;
         window.addEventListener('message', messageHandler);
 
-        // 生命周期监听
+        // 注册生命周期监听
         visibilityHandler = onVisibilityChange;
         pageshowHandler = onPageShow;
-        pagehideHandler = cleanup;
+        pagehideHandler = onPageHide;
+        beforeUnloadHandler = cleanup;
 
         document.addEventListener('visibilitychange', visibilityHandler);
         window.addEventListener('pageshow', pageshowHandler);
         window.addEventListener('pagehide', pagehideHandler);
-        window.addEventListener('beforeunload', pagehideHandler);
+        window.addEventListener('beforeunload', beforeUnloadHandler);
 
         dbg('页面初始化完成，当前URL: ' + window.location.href);
 
-        // 先回放缓存消息
+        // 回放缓存消息
         replayCachedMessage();
+
+        // 回放完成后移除早期监听器
+        removeEarlyMessageHandler();
 
         // 如果还没收到宿主消息，开始握手
         if (!liveReceived) {
@@ -298,34 +374,71 @@
         startHandshake();
     }
 
-    function onPageShow() {
+    function onPageShow(event) {
+        if (event && event.persisted) {
+            dbg('页面从BFCache恢复');
+        }
         if (liveReceived) return;
-        dbg('pageshow 恢复，重新握手');
+        dbg('pageshow恢复，重新握手');
         startHandshake();
     }
 
-    function cleanup() {
+    function onPageHide(event) {
         stopHandshake();
+
         if (currentAbortController) {
             currentAbortController.abort();
             currentAbortController = null;
         }
+
+        // persisted=true表示进入BFCache，不能移除监听器
+        if (event && event.persisted) {
+            dbg('页面进入BFCache，保留消息监听器');
+            return;
+        }
+
+        cleanup();
+    }
+
+    function cleanup() {
+        stopHandshake();
+
+        if (currentAbortController) {
+            currentAbortController.abort();
+            currentAbortController = null;
+        }
+
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+            debounceTimer = null;
+        }
+
+        removeEarlyMessageHandler();
+        window.__scBloodSugarMsg = null;
+
         if (messageHandler) {
             window.removeEventListener('message', messageHandler);
             messageHandler = null;
         }
+
         if (visibilityHandler) {
             document.removeEventListener('visibilitychange', visibilityHandler);
             visibilityHandler = null;
         }
+
         if (pageshowHandler) {
             window.removeEventListener('pageshow', pageshowHandler);
             pageshowHandler = null;
         }
+
         if (pagehideHandler) {
             window.removeEventListener('pagehide', pagehideHandler);
-            window.removeEventListener('beforeunload', pagehideHandler);
             pagehideHandler = null;
+        }
+
+        if (beforeUnloadHandler) {
+            window.removeEventListener('beforeunload', beforeUnloadHandler);
+            beforeUnloadHandler = null;
         }
     }
 
@@ -576,7 +689,6 @@
         fetch(url, { signal: currentAbortController.signal })
             .then(function (response) {
                 if (!response.ok) {
-                    // 尝试解析 JSON 错误响应，失败则用文本
                     return response.text().then(function (text) {
                         try {
                             var err = JSON.parse(text);
