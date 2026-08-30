@@ -879,7 +879,7 @@
         aoa.push(['时区', 'Asia/Shanghai']);
         aoa.push([]);
 
-        aoa.push(['序号', '血糖时间', '血糖（mmol/L）', '胰岛素（U）', '激素当量（mg）', '校正因子', 'IRI', '激素详情']);
+        aoa.push(['序号', '血糖时间', '血糖（mmol/L）', '胰岛素（U）', '类固醇激素量（mg）', '类固醇因子', 'IRI', '激素详情']);
 
         var rows = $tableBody.querySelectorAll('tr');
         for (var i = 0; i < rows.length; i++) {
