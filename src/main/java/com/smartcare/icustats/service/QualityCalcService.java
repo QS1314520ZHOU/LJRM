@@ -919,7 +919,7 @@ public class QualityCalcService {
      * Build order query filter up to month end (inclusive of all orders before month end).
      * Original JS: orderQueryToMonthEnd(monthKey, nameKeywords, extra)
      */
-    private Document orderQueryToMonthEnd(String monthKey, List<String> nameKeywords) {
+    Document orderQueryToMonthEnd(String monthKey, List<String> nameKeywords) {
         MonthRange range = monthRange(monthKey);
         List<Document> ors = new ArrayList<>();
         for (String k : nameKeywords) {

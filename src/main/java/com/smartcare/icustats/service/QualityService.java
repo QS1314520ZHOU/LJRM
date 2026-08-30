@@ -36,6 +36,7 @@ public class QualityService {
     private static final ZoneId SHANGHAI_ZONE = ZoneId.of("Asia/Shanghai");
     private static final DateTimeFormatter YYYY_MM = DateTimeFormatter.ofPattern("yyyy-MM");
     private static final int APACHE_UNSCORED_ORDER = 2;
+    private static final long HOURS_48_MS = 48L * 60 * 60 * 1000;
 
     // ════════════════════════════════════════════════════════════════════
     // Constants
@@ -1325,6 +1326,7 @@ public class QualityService {
 
     private Map<String, Object> buildExtubationReturnDetailRows(Map<String, Object> spec, String key, int itemOrder, List<String> months, String department) {
         List<Map<String, Object>> rows = new ArrayList<>();
+        List<Map<String, String>> columns = PATIENT_DETAIL_COLUMNS;
 
         for (String monthKey : months) {
             MonthRange range = DateRangeUtils.getMonthRange(monthKey);
@@ -1388,7 +1390,7 @@ public class QualityService {
                                 .and("type").is("气插管")
                                 .and("valid").ne(false)
                                 .and("replace").ne(true));
-                        historyQuery.with(Sort.by(Sort.Direction.ASC, "startTime"));
+                        historyQuery.with(Sort.by(org.springframework.data.domain.Sort.Direction.ASC, "startTime"));
                         List<Document> allHistory = smartCareMongo.find(historyQuery, Document.class, CollectionConstants.TUBE_EXE);
 
                         Map<String, List<Document>> byPid = new LinkedHashMap<>();
@@ -1400,12 +1402,12 @@ public class QualityService {
                         if (itemOrder == 0) {
                             // Numerator: reintubated within 48h
                             for (Document t : tubes) {
-                                Date endTime = asDate(t.get("endTime"));
+                                Date endTime = NumberUtils.asDate(t.get("endTime"));
                                 if (endTime == null) continue;
                                 String pid = String.valueOf(t.get("pid"));
                                 List<Document> arr = byPid.getOrDefault(pid, Collections.emptyList());
                                 for (Document x : arr) {
-                                    Date xStart = asDate(x.get("startTime"));
+                                    Date xStart = NumberUtils.asDate(x.get("startTime"));
                                     if (xStart != null && xStart.after(endTime) && (xStart.getTime() - endTime.getTime()) <= HOURS_48_MS) {
                                         Document patient = patientByPid.get(pid);
                                         if (patient != null) {
@@ -1446,7 +1448,7 @@ public class QualityService {
                             .collect(Collectors.toList());
 
                     Query allQuery = new Query(Criteria.where("mrn").in(mrns));
-                    allQuery.with(Sort.by(Sort.Direction.ASC, "icuAdmissionTime"));
+                    allQuery.with(Sort.by(org.springframework.data.domain.Sort.Direction.ASC, "icuAdmissionTime"));
                     List<Document> all = smartCareMongo.find(allQuery, Document.class, CollectionConstants.PATIENT);
 
                     Map<String, List<Document>> byMrn = new LinkedHashMap<>();
@@ -1458,13 +1460,13 @@ public class QualityService {
                     if (itemOrder == 0) {
                         // Numerator: returned within 48h
                         for (Document p : out) {
-                            Date dischargeTime = asDate(p.get("icuDischargeTime"));
+                            Date dischargeTime = NumberUtils.asDate(p.get("icuDischargeTime"));
                             String mrn = (String) p.get("mrn");
                             if (dischargeTime == null || mrn == null) continue;
 
                             List<Document> arr = byMrn.getOrDefault(mrn, Collections.emptyList());
                             for (Document r : arr) {
-                                Date rAdmission = asDate(r.get("icuAdmissionTime"));
+                                Date rAdmission = NumberUtils.asDate(r.get("icuAdmissionTime"));
                                 if (rAdmission != null && rAdmission.after(dischargeTime)
                                         && (rAdmission.getTime() - dischargeTime.getTime()) <= HOURS_48_MS) {
                                     Map<String, Object> extra = new LinkedHashMap<>();
@@ -1505,7 +1507,7 @@ public class QualityService {
             switch (key) {
                 case "shockBundleRate":
                     matched = qualityCalcService.getMatchedPatientsByOrderFilter(monthKey, patients,
-                            orderQueryToMonthEnd(monthKey, Collections.singletonList("感染性休克集束化治疗")));
+                            qualityCalcService.orderQueryToMonthEnd(monthKey, Collections.singletonList("感染性休克集束化治疗")));
                     break;
                 case "shockUltrasoundRate":
                     matched = qualityCalcService.calcOrderBasedCarryover(monthKey, department, "休克护理常规", "重症超声筛查评估");

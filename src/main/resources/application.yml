@@ -62,6 +62,23 @@ icu-stats:
     # 自动发现集合 (性能较差，仅在不知道集合名时使用)
     auto-discover-collection: ${NUTRITION_QUALITY_AUTO_DISCOVER_COLLECTION:false}
     # ═══════════════════════════════════════════════════════════
+    # checked-value: 并发症/管道通畅/冲管的"已发生"判定值
+    # 真实数据中这些字段是字符串，不是 Boolean
+    # 只有字段值（trim后）严格等于此配置值时才判定为"是"
+    # ═══════════════════════════════════════════════════════════
+    checked-value: ${NUTRITION_QUALITY_CHECKED_VALUE:√}
+    # ═══════════════════════════════════════════════════════════
+    # route-values: 喂养管类型编码映射
+    # tj 字段表示喂养管类型（均为肠内营养通路）
+    # A=鼻胃管, B=鼻肠管, C=胃造口, D=其它
+    # 未匹配的值统一返回 UNKNOWN
+    # ═══════════════════════════════════════════════════════════
+    route-values:
+      nasogastric: ${NUTRITION_QUALITY_ROUTE_NASOGASTRIC:A}
+      nasojejunal: ${NUTRITION_QUALITY_ROUTE_NASOJEJUNAL:B}
+      gastrostomy: ${NUTRITION_QUALITY_ROUTE_GASTROSTOMY:C}
+      other: ${NUTRITION_QUALITY_ROUTE_OTHER:D}
+    # ═══════════════════════════════════════════════════════════
     # MongoDB 字段映射
     # 左侧 = 程序内部字段名, 右侧 = MongoDB 文档中的实际字段名
     # 如果数据库字段名与默认值不同，修改右侧值即可
@@ -81,32 +98,33 @@ icu-stats:
       # 床号
       bed: ${NUTRITION_QUALITY_FIELD_BED:bed}
 
-      # ── 营养通路字段 ──────────────────────────────────────────
-      # 通路类型 (tj: EN=肠内, PN=肠外, EN+PN=联合)
+      # ── 喂养管类型字段 ────────────────────────────────────────
+      # tj 表示喂养管类型: A=鼻胃管, B=鼻肠管, C=胃造口, D=其它
+      # 实际编码由 route-values 配置
       route: ${NUTRITION_QUALITY_FIELD_ROUTE:tj}
       # 输注速度 (ml/h)
       speed: ${NUTRITION_QUALITY_FIELD_SPEED:sd}
       # 置管深度 (cm)
       depth: ${NUTRITION_QUALITY_FIELD_DEPTH:cd}
-      # 管道通畅性 (tcx: 通畅/不通畅等)
+      # 管道通畅性 — 字符串字段，"√" 表示通畅
       patency: ${NUTRITION_QUALITY_FIELD_PATENCY:tcx}
 
       # ── 喂养评估字段 ──────────────────────────────────────────
-      # 胃液颜色 (wyys: 黄绿色/咖啡色/血性等)
+      # 胃液颜色 — 用户自行输入的自由文本，不是编码
       gastric-color: ${NUTRITION_QUALITY_FIELD_GASTRIC_COLOR:wyys}
-      # 冲管操作 (cg: 已冲管/未冲管)
+      # 冲管操作 — 字符串字段，"√" 表示已执行冲管
       flushing: ${NUTRITION_QUALITY_FIELD_FLUSHING:cg}
       # 残余量 (ml)
       residual-volume: ${NUTRITION_QUALITY_FIELD_RESIDUAL:wcyl}
 
       # ── 耐受性评分字段 ────────────────────────────────────────
-      # 耐受性总分 (zf: 0=耐受, >0=不耐受)
+      # 耐受性总分 (zf: 0=耐受, >0=不耐受, null=未评估)
       tolerance-score: ${NUTRITION_QUALITY_FIELD_SCORE:zf}
-      # 评分E项 (腹胀评分)
+      # 评分E项 (腹胀评分，>0 表示阳性)
       score-e: ${NUTRITION_QUALITY_FIELD_SCORE_E:e}
-      # 评分F项 (腹泻评分)
+      # 评分F项 (腹泻评分，>0 表示阳性)
       score-f: ${NUTRITION_QUALITY_FIELD_SCORE_F:f}
-      # 评分G项 (误吸评分)
+      # 评分G项 (误吸评分，>0 表示阳性)
       score-g: ${NUTRITION_QUALITY_FIELD_SCORE_G:g}
 
       # ── 干预措施字段 ──────────────────────────────────────────
@@ -114,29 +132,32 @@ icu-stats:
       intervention: ${NUTRITION_QUALITY_FIELD_INTERVENTION:cs}
       # 干预代码列表 (csList: 数组，如 ["H","J"])
       intervention-list: ${NUTRITION_QUALITY_FIELD_INTERVENTION_LIST:csList}
-      # 暂停原因
-      pause-reason: ${NUTRITION_QUALITY_FIELD_PAUSE_REASON:}
+      # 暂停原因 (文本)
+      pause-reason: ${NUTRITION_QUALITY_FIELD_PAUSE_REASON:ztyy}
+      # 暂停原因列表 (数组，优先于 pause-reason)
+      pause-reason-list: ${NUTRITION_QUALITY_FIELD_PAUSE_REASON_LIST:ztyyList}
 
       # ── 目标量/完成量字段 (用于计划完成率计算) ─────────────────
-      # 目标喂养量 (ml)，未映射则该指标显示"需映射"
-      target-volume: ${NUTRITION_QUALITY_FIELD_TARGET_VOLUME:}
-      # 实际完成量 (ml)，未映射则该指标显示"需映射"
-      completed-volume: ${NUTRITION_QUALITY_FIELD_COMPLETED_VOLUME:}
+      # 目标量 — 真实数据为字符串(如 "1")，需通过 toDecimal 解析
+      # 业务含义和单位仍需需求方最终确认
+      target-volume: ${NUTRITION_QUALITY_FIELD_TARGET_VOLUME:mbl}
+      # 完成量 — 真实数据为字符串(如 "2")，需通过 toDecimal 解析
+      completed-volume: ${NUTRITION_QUALITY_FIELD_COMPLETED_VOLUME:wcl}
 
-      # ── 并发症字段 (用于并发症相关指标计算) ────────────────────
+      # ── 并发症字段 (字符串字段，"√" 表示发生) ──────────────────
       # 机械性并发症 (堵管、脱管、移位等)
-      mechanical-complication: ${NUTRITION_QUALITY_FIELD_MECHANICAL:}
+      mechanical-complication: ${NUTRITION_QUALITY_FIELD_MECHANICAL:jxx}
       # 胃肠道并发症 (腹胀、腹泻、呕吐等)
-      gastrointestinal-complication: ${NUTRITION_QUALITY_FIELD_GASTROINTESTINAL:}
+      gastrointestinal-complication: ${NUTRITION_QUALITY_FIELD_GASTROINTESTINAL:wcd}
       # 代谢性并发症 (高血糖、低血糖、电解质紊乱等)
-      metabolic-complication: ${NUTRITION_QUALITY_FIELD_METABOLIC:}
+      metabolic-complication: ${NUTRITION_QUALITY_FIELD_METABOLIC:dxx}
       # 感染性并发症 (吸入性肺炎、导管相关感染等)
-      infection-complication: ${NUTRITION_QUALITY_FIELD_INFECTION:}
+      infection-complication: ${NUTRITION_QUALITY_FIELD_INFECTION:grx}
       # 再喂养综合征
-      refeeding-syndrome: ${NUTRITION_QUALITY_FIELD_REFEEDING:}
+      refeeding-syndrome: ${NUTRITION_QUALITY_FIELD_REFEEDING:zhz}
 
       # ── 备注字段 ──────────────────────────────────────────────
-      remark: ${NUTRITION_QUALITY_FIELD_REMARK:}
+      remark: ${NUTRITION_QUALITY_FIELD_REMARK:bz}
 
 logging:
   level:

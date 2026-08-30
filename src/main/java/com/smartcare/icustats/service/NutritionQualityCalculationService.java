@@ -2,7 +2,6 @@ package com.smartcare.icustats.service;
 
 import com.smartcare.icustats.config.NutritionQualityProperties;
 import com.smartcare.icustats.dto.NutritionQualityCell;
-import com.smartcare.icustats.util.DateRangeUtils;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -165,6 +164,27 @@ public class NutritionQualityCalculationService {
     }
 
     // ════════════════════════════════════════════════════════════════════
+    // 患者级去重辅助
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * 按患者去重后的 pid 集合
+     */
+    public Set<String> uniquePids(List<Document> records) {
+        return records.stream()
+                .map(adapter::getPid)
+                .filter(p -> !p.isEmpty())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    /**
+     * 按患者+日期去重的记录数
+     */
+    public int deduplicatedCount(List<Document> records) {
+        return selectLatestDailyAssessment(records).size();
+    }
+
+    // ════════════════════════════════════════════════════════════════════
     // 指标计算
     // ════════════════════════════════════════════════════════════════════
 
@@ -204,7 +224,7 @@ public class NutritionQualityCalculationService {
 
     /**
      * 计算肠内营养计划完成率
-     * 需要 targetVolume 和 completedVolume 字段映射
+     * 使用 BigDecimal 精确计算，防止精度丢失
      */
     public NutritionQualityCell calcPlanCompletionRate(List<Document> records) {
         if (!adapter.isTargetVolumeMapped() || !adapter.isCompletedVolumeMapped()) {
@@ -218,15 +238,15 @@ public class NutritionQualityCalculationService {
 
         for (Document record : records) {
             if (!adapter.isValidRecord(record)) continue;
-            Double target = adapter.getTargetVolume(record);
-            Double completed = adapter.getCompletedVolume(record);
+            BigDecimal target = adapter.getTargetVolume(record);
+            BigDecimal completed = adapter.getCompletedVolume(record);
 
             // 只有目标量和完成量均有效时才进入分母
-            if (target == null || target <= 0) continue;
+            if (target == null || target.compareTo(BigDecimal.ZERO) <= 0) continue;
             if (completed == null) continue;
 
             denominator++;
-            if (completed >= target) {
+            if (completed.compareTo(target) >= 0) {
                 numerator++;
             }
         }
@@ -241,7 +261,8 @@ public class NutritionQualityCalculationService {
 
     /**
      * 计算喂养管堵管发生率
-     * 需要 mechanicalComplication 字段映射
+     * 使用 isChecked 判断机械性并发症
+     * 分子: 按患者去重，只要任意一条记录有并发症即计入
      */
     public NutritionQualityCell calcTubeBlockageRate(List<Document> records) {
         if (!adapter.isComplicationFieldMapped("mechanicalComplication")) {
@@ -250,25 +271,27 @@ public class NutritionQualityCalculationService {
 
         if (records.isEmpty()) return NutritionQualityCell.noData();
 
-        // 简化实现：按记录计数
-        int denominator = 0;
-        int numerator = 0;
-
+        // 按 patient+day 去重
+        Map<String, Document> latestByPatientDay = new LinkedHashMap<>();
         for (Document record : records) {
             if (!adapter.isValidRecord(record)) continue;
-            denominator++;
-
-            String mech = adapter.getMechanicalComplication(record);
-            if (mech.contains("堵管") || mech.contains("阻塞")) {
-                numerator++;
-            }
+            String pid = adapter.getPid(record);
+            Date time = adapter.getRecordTime(record);
+            if (pid.isEmpty() || time == null) continue;
+            String key = pid + "::" + toShanghaiDate(time);
+            latestByPatientDay.put(key, record);
         }
 
+        int denominator = latestByPatientDay.size();
         if (denominator == 0) return NutritionQualityCell.noData();
+
+        long numerator = latestByPatientDay.values().stream()
+                .filter(adapter::hasMechanicalComplication)
+                .count();
 
         double rate = numerator * 100.0 / denominator;
         boolean compliant = rate < 5.0;
-        return NutritionQualityCell.ok(numerator, denominator,
+        return NutritionQualityCell.ok((int) numerator, denominator,
                 BigDecimal.valueOf(rate).setScale(2, RoundingMode.HALF_UP).doubleValue(), compliant);
     }
 
@@ -305,7 +328,11 @@ public class NutritionQualityCalculationService {
 
     /**
      * 计算喂养不耐受发生率
-     * 基于耐受性总分 zf > 阈值
+     * 基于耐受性总分:
+     * - zf == 0: 耐受
+     * - zf > 0: 不耐受
+     * - zf == null: 未评估（不计入分母）
+     * 不耐受率的分母必须是 assessedCount，不是全部记录数
      */
     public NutritionQualityCell calcFeedingIntoleranceRate(List<Document> records) {
         if (records.isEmpty()) return NutritionQualityCell.noData();
@@ -321,22 +348,27 @@ public class NutritionQualityCalculationService {
             latestByPatientDay.put(key, record);
         }
 
-        int denominator = latestByPatientDay.size();
-        if (denominator == 0) return NutritionQualityCell.noData();
+        if (latestByPatientDay.isEmpty()) return NutritionQualityCell.noData();
 
-        // 不耐受判定: zf > 0 或 包含J干预
-        long numerator = latestByPatientDay.values().stream()
-                .filter(record -> {
-                    Integer score = adapter.getToleranceScore(record);
-                    boolean highScore = score != null && score > 0;
-                    boolean hasPause = adapter.hasPauseIntervention(record);
-                    return highScore || hasPause;
-                })
-                .count();
+        // 统计耐受性分类
+        int assessedCount = 0;
+        int intolerantCount = 0;
 
-        double rate = numerator * 100.0 / denominator;
+        for (Document record : latestByPatientDay.values()) {
+            String tolerance = adapter.classifyTolerance(record);
+            if ("unassessed".equals(tolerance)) continue; // 未评估不进入分母
+
+            assessedCount++;
+            // 不耐受: zf > 0 或 包含J干预
+            boolean intolerant = "intolerant".equals(tolerance) || adapter.hasPauseIntervention(record);
+            if (intolerant) intolerantCount++;
+        }
+
+        if (assessedCount == 0) return NutritionQualityCell.noData();
+
+        double rate = intolerantCount * 100.0 / assessedCount;
         boolean compliant = rate < 20.0;
-        return NutritionQualityCell.ok((int) numerator, denominator,
+        return NutritionQualityCell.ok(intolerantCount, assessedCount,
                 BigDecimal.valueOf(rate).setScale(2, RoundingMode.HALF_UP).doubleValue(), compliant);
     }
 
@@ -352,6 +384,115 @@ public class NutritionQualityCalculationService {
                 .doubleValue();
         boolean compliant = ratio >= 2.0;
         return NutritionQualityCell.ok(enteralPatients, parenteralPatients, ratio, compliant);
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 并发症患者级统计
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * 并发症患者级统计
+     * 同一患者同一统计周期多条记录，只要任意一条有效记录为 "√"，该患者即计为发生
+     *
+     * @return Map: assessedCount, affectedCount, assessedPids, affectedPids
+     */
+    public Map<String, Object> calcComplicationStats(List<Document> records,
+                                                      String complicationType) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        Set<String> assessedPids = new LinkedHashSet<>();
+        Set<String> affectedPids = new LinkedHashSet<>();
+
+        for (Document record : records) {
+            if (!adapter.isValidRecord(record)) continue;
+            String pid = adapter.getPid(record);
+            if (pid.isEmpty()) continue;
+
+            assessedPids.add(pid);
+
+            boolean affected;
+            switch (complicationType) {
+                case "mechanical":
+                    affected = adapter.hasMechanicalComplication(record);
+                    break;
+                case "gastrointestinal":
+                    affected = adapter.hasGastrointestinalComplication(record);
+                    break;
+                case "metabolic":
+                    affected = adapter.hasMetabolicComplication(record);
+                    break;
+                case "infection":
+                    affected = adapter.hasInfectionComplication(record);
+                    break;
+                case "refeeding":
+                    affected = adapter.hasRefeedingSyndrome(record);
+                    break;
+                case "any":
+                    affected = adapter.hasAnyComplication(record);
+                    break;
+                default:
+                    affected = false;
+            }
+
+            if (affected) {
+                affectedPids.add(pid);
+            }
+        }
+
+        result.put("assessedCount", assessedPids.size());
+        result.put("affectedCount", affectedPids.size());
+        result.put("assessedPids", assessedPids);
+        result.put("affectedPids", affectedPids);
+        return result;
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 耐受性统计
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * 耐受性患者级统计
+     * @return Map: assessedCount, tolerantCount, intolerantCount, unassessedCount
+     */
+    public Map<String, Object> calcToleranceStats(List<Document> records) {
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        // 按 patient+day 去重
+        Map<String, Document> latestByPatientDay = new LinkedHashMap<>();
+        for (Document record : records) {
+            if (!adapter.isValidRecord(record)) continue;
+            String pid = adapter.getPid(record);
+            Date time = adapter.getRecordTime(record);
+            if (pid.isEmpty() || time == null) continue;
+            String key = pid + "::" + toShanghaiDate(time);
+            latestByPatientDay.put(key, record);
+        }
+
+        int assessedCount = 0;
+        int tolerantCount = 0;
+        int intolerantCount = 0;
+        int unassessedCount = 0;
+
+        for (Document record : latestByPatientDay.values()) {
+            String tolerance = adapter.classifyTolerance(record);
+            switch (tolerance) {
+                case "tolerant":
+                    assessedCount++;
+                    tolerantCount++;
+                    break;
+                case "intolerant":
+                    assessedCount++;
+                    intolerantCount++;
+                    break;
+                default:
+                    unassessedCount++;
+            }
+        }
+
+        result.put("assessedCount", assessedCount);
+        result.put("tolerantCount", tolerantCount);
+        result.put("intolerantCount", intolerantCount);
+        result.put("unassessedCount", unassessedCount);
+        return result;
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -396,27 +537,39 @@ public class NutritionQualityCalculationService {
                 break;
 
             case "feedingIntoleranceRate":
-                Integer score = adapter.getToleranceScore(record);
-                if (score != null && score > 0) {
-                    reason.append("zf=").append(score).append(">0，计入分子");
+                String tolerance = adapter.classifyTolerance(record);
+                if ("unassessed".equals(tolerance)) {
+                    reason.append("zf=null，未评估，不计入分母");
+                } else if ("intolerant".equals(tolerance)) {
+                    reason.append("zf>0，不耐受，计入分子");
                 } else if (adapter.hasPauseIntervention(record)) {
-                    reason.append("csList含J，计入分子");
+                    reason.append("zf=0但csList含J，计入分子");
                 } else {
                     reason.append("耐受性良好，不计入分子");
                 }
                 break;
 
             case "enteralPlanCompletionRate":
-                Double target = adapter.getTargetVolume(record);
-                Double completed = adapter.getCompletedVolume(record);
+                BigDecimal target = adapter.getTargetVolume(record);
+                BigDecimal completed = adapter.getCompletedVolume(record);
                 if (target == null) {
                     reason.append("目标量为空，不计入分母");
+                } else if (target.compareTo(BigDecimal.ZERO) <= 0) {
+                    reason.append("目标量<=0，不计入分母");
                 } else if (completed == null) {
                     reason.append("完成量为空，不计入分母");
-                } else if (completed >= target) {
-                    reason.append("完成量≥目标量，计入分子");
+                } else if (completed.compareTo(target) >= 0) {
+                    reason.append("完成量>=目标量，计入分子");
                 } else {
                     reason.append("完成量<目标量，不计入分子");
+                }
+                break;
+
+            case "feedingTubeBlockageRate":
+                if (adapter.hasMechanicalComplication(record)) {
+                    reason.append("机械性并发症为" + properties.getCheckedValue() + "，计入分子");
+                } else {
+                    reason.append("无机械性并发症，不计入分子");
                 }
                 break;
 

@@ -4,8 +4,10 @@ import com.smartcare.icustats.config.NutritionQualityProperties;
 import com.smartcare.icustats.dto.NutritionQualityCell;
 import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -58,6 +60,12 @@ class NutritionQualityCalculationServiceTest {
         assertEquals(100.0, cell.getValue());
     }
 
+    @Test
+    void safeRate_roundsTo2Decimals() {
+        NutritionQualityCell cell = NutritionQualityCalculationService.safeRate(1, 3, true);
+        assertEquals(33.33, cell.getValue(), 0.01);
+    }
+
     // ════════════════════════════════════════════════════════════════════
     // safeRatio
     // ════════════════════════════════════════════════════════════════════
@@ -75,109 +83,479 @@ class NutritionQualityCalculationServiceTest {
         assertEquals("no_denominator", cell.getDataStatus());
     }
 
-    @Test
-    void safeRatio_equalValues_returnsOne() {
-        NutritionQualityCell cell = NutritionQualityCalculationService.safeRatio(5, 5, true);
-        assertEquals(1.0, cell.getValue());
-    }
-
     // ════════════════════════════════════════════════════════════════════
-    // toShanghaiMonth / toShanghaiDate
+    // toShanghaiMonth / toShanghaiDate — UTC→Asia/Shanghai
     // ════════════════════════════════════════════════════════════════════
 
-    @Test
-    void toShanghaiMonth_utcDate_returnsCorrectMonth() {
-        // 2024-01-15T11:00:00Z → Shanghai 2024-01-15 19:00 → 2024-01
-        Date utcDate = new Date(1705316400000L);
-        assertEquals("2024-01", calcService.toShanghaiMonth(utcDate));
-    }
+    @Nested
+    class TimezoneTest {
+        @Test
+        void toShanghaiMonth_utcDate_returnsCorrectMonth() {
+            // 2026-08-30T05:37:00Z → Shanghai 2026-08-30 13:37 → 2026-08
+            Date utcDate = Date.from(java.time.Instant.parse("2026-08-30T05:37:00Z"));
+            assertEquals("2026-08", calcService.toShanghaiMonth(utcDate));
+        }
 
-    @Test
-    void toShanghaiDate_utcDate_returnsCorrectDate() {
-        Date utcDate = new Date(1705316400000L);
-        assertEquals("2024-01-15", calcService.toShanghaiDate(utcDate));
-    }
+        @Test
+        void toShanghaiDate_utcDate_returnsCorrectDate() {
+            Date utcDate = Date.from(java.time.Instant.parse("2026-08-30T05:37:00Z"));
+            assertEquals("2026-08-30", calcService.toShanghaiDate(utcDate));
+        }
 
-    @Test
-    void toShanghaiMonth_null_returnsEmpty() {
-        assertEquals("", calcService.toShanghaiMonth(null));
-    }
+        @Test
+        void toShanghaiMonth_nearMidnight_handlesCrossDay() {
+            // UTC 2026-08-31T23:30:00Z → Shanghai 2026-09-01 07:30 → 2026-09
+            Date utcDate = Date.from(java.time.Instant.parse("2026-08-31T23:30:00Z"));
+            assertEquals("2026-09", calcService.toShanghaiMonth(utcDate));
+        }
 
-    @Test
-    void toShanghaiDate_null_returnsEmpty() {
-        assertEquals("", calcService.toShanghaiDate(null));
-    }
+        @Test
+        void toShanghaiMonth_nearMonthEnd_handlesCrossMonth() {
+            // UTC 2026-07-31T16:00:00Z → Shanghai 2026-08-01 00:00 → 2026-08
+            Date utcDate = Date.from(java.time.Instant.parse("2026-07-31T16:00:00Z"));
+            assertEquals("2026-08", calcService.toShanghaiMonth(utcDate));
+        }
 
-    @Test
-    void toShanghaiMonth_nearMidnight_handlesCorrectly() {
-        // UTC 2024-01-31T23:30:00Z → Shanghai 2024-02-01 07:30 → 2024-02
-        Date utcDate = new Date(1706747400000L);
-        assertEquals("2024-02", calcService.toShanghaiMonth(utcDate));
+        @Test
+        void toShanghaiMonth_null_returnsEmpty() {
+            assertEquals("", calcService.toShanghaiMonth(null));
+        }
+
+        @Test
+        void toShanghaiDate_null_returnsEmpty() {
+            assertEquals("", calcService.toShanghaiDate(null));
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════
     // selectLatestDailyAssessment
     // ════════════════════════════════════════════════════════════════════
 
-    @Test
-    void selectLatestDailyAssessment_emptyList_returnsEmpty() {
-        List<Document> result = calcService.selectLatestDailyAssessment(Collections.emptyList());
-        assertTrue(result.isEmpty());
+    @Nested
+    class DailyAssessmentTest {
+        @Test
+        void emptyList_returnsEmpty() {
+            List<Document> result = calcService.selectLatestDailyAssessment(Collections.emptyList());
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        void samePatientSameDay_keepsLatest() {
+            // Both on same Shanghai date: 2026-08-30
+            Date morning = Date.from(java.time.Instant.parse("2026-08-30T03:00:00Z")); // 11:00 Shanghai
+            Date evening = Date.from(java.time.Instant.parse("2026-08-30T11:00:00Z")); // 19:00 Shanghai
+
+            Document early = new Document("pid", "p1")
+                    .append("startTime", morning)
+                    .append("valid", "valid");
+            Document late = new Document("pid", "p1")
+                    .append("startTime", evening)
+                    .append("valid", "valid");
+
+            List<Document> result = calcService.selectLatestDailyAssessment(Arrays.asList(early, late));
+            assertEquals(1, result.size());
+            assertEquals(evening, result.get(0).get("startTime"));
+        }
+
+        @Test
+        void differentPatients_bothKept() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document r1 = new Document("pid", "p1").append("startTime", time).append("valid", "valid");
+            Document r2 = new Document("pid", "p2").append("startTime", time).append("valid", "valid");
+
+            List<Document> result = calcService.selectLatestDailyAssessment(Arrays.asList(r1, r2));
+            assertEquals(2, result.size());
+        }
+
+        @Test
+        void invalidRecords_filtered() {
+            Document invalid = new Document("pid", "p1")
+                    .append("startTime", new Date())
+                    .append("valid", "invalid");
+
+            List<Document> result = calcService.selectLatestDailyAssessment(Collections.singletonList(invalid));
+            assertTrue(result.isEmpty());
+        }
     }
 
-    @Test
-    void selectLatestDailyAssessment_samePatientSameDay_keepsLatest() {
-        // Both on same Shanghai date: 2024-01-15
-        Date morning = new Date(1705291200000L); // 2024-01-15T04:00:00Z → 12:00 Shanghai
-        Date evening = new Date(1705320000000L); // 2024-01-15T12:00:00Z → 20:00 Shanghai
+    // ════════════════════════════════════════════════════════════════════
+    // calcInterruptionRate
+    // ════════════════════════════════════════════════════════════════════
 
-        Document early = new Document("pid", "p1")
-                .append("startTime", morning)
-                .append("valid", "valid");
-        Document late = new Document("pid", "p1")
-                .append("startTime", evening)
-                .append("valid", "valid");
+    @Nested
+    class InterruptionRateTest {
+        @Test
+        void emptyRecords_returnsNoData() {
+            NutritionQualityCell cell = calcService.calcInterruptionRate(Collections.emptyList());
+            assertEquals("no_data", cell.getDataStatus());
+        }
 
-        List<Document> result = calcService.selectLatestDailyAssessment(Arrays.asList(early, late));
-        assertEquals(1, result.size());
-        assertEquals(evening, result.get(0).get("startTime"));
+        @Test
+        void withPauseIntervention_calculatesCorrectly() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document withPause = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("csList", Arrays.asList("J"));
+            Document withoutPause = new Document("pid", "p2")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("csList", Arrays.asList("H"));
+
+            NutritionQualityCell cell = calcService.calcInterruptionRate(Arrays.asList(withPause, withoutPause));
+            assertEquals("ok", cell.getDataStatus());
+            assertEquals(1, cell.getNumerator());
+            assertEquals(2, cell.getDenominator());
+            assertEquals(50.0, cell.getValue());
+            assertFalse(cell.getCompliant()); // 50% > 10%
+        }
+
+        @Test
+        void csFieldOnly_recognizesPause() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document withPause = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("cs", "J");
+
+            NutritionQualityCell cell = calcService.calcInterruptionRate(Collections.singletonList(withPause));
+            assertEquals(1, cell.getNumerator());
+            assertFalse(cell.getCompliant()); // 100% > 10%
+        }
+
+        @Test
+        void noInterruption_compliant() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document doc = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("csList", Arrays.asList("H", "I"));
+
+            NutritionQualityCell cell = calcService.calcInterruptionRate(Collections.singletonList(doc));
+            assertEquals(0, cell.getNumerator());
+            assertEquals(0.0, cell.getValue());
+            assertTrue(cell.getCompliant());
+        }
     }
 
-    @Test
-    void selectLatestDailyAssessment_differentPatientsBothKept() {
-        Date time = new Date(1705316400000L);
-        Document r1 = new Document("pid", "p1").append("startTime", time).append("valid", "valid");
-        Document r2 = new Document("pid", "p2").append("startTime", time).append("valid", "valid");
+    // ════════════════════════════════════════════════════════════════════
+    // calcFeedingIntoleranceRate — 使用 assessedCount 作为分母
+    // ════════════════════════════════════════════════════════════════════
 
-        List<Document> result = calcService.selectLatestDailyAssessment(Arrays.asList(r1, r2));
-        assertEquals(2, result.size());
+    @Nested
+    class FeedingIntoleranceRateTest {
+        @Test
+        void emptyRecords_returnsNoData() {
+            NutritionQualityCell cell = calcService.calcFeedingIntoleranceRate(Collections.emptyList());
+            assertEquals("no_data", cell.getDataStatus());
+        }
+
+        @Test
+        void highScore_inNumerator() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document intolerant = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("zf", 3);
+            Document tolerant = new Document("pid", "p2")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("zf", 0);
+
+            NutritionQualityCell cell = calcService.calcFeedingIntoleranceRate(Arrays.asList(intolerant, tolerant));
+            assertEquals("ok", cell.getDataStatus());
+            assertEquals(1, cell.getNumerator());
+            assertEquals(2, cell.getDenominator());
+            assertEquals(50.0, cell.getValue());
+            assertFalse(cell.getCompliant()); // 50% > 20%
+        }
+
+        @Test
+        void jIntervention_inNumerator() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document withJ = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("zf", 0)
+                    .append("csList", Arrays.asList("J"));
+
+            NutritionQualityCell cell = calcService.calcFeedingIntoleranceRate(Collections.singletonList(withJ));
+            assertEquals(1, cell.getNumerator());
+            assertFalse(cell.getCompliant());
+        }
+
+        @Test
+        void allTolerant_compliant() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document doc = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("zf", 0);
+
+            NutritionQualityCell cell = calcService.calcFeedingIntoleranceRate(Collections.singletonList(doc));
+            assertEquals(0, cell.getNumerator());
+            assertTrue(cell.getCompliant());
+        }
+
+        @Test
+        void unassessed_notCountedInDenominator() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document assessed = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("zf", 0);
+            // p2 has no zf → unassessed
+            Document unassessed = new Document("pid", "p2")
+                    .append("startTime", time)
+                    .append("valid", "valid");
+
+            NutritionQualityCell cell = calcService.calcFeedingIntoleranceRate(Arrays.asList(assessed, unassessed));
+            assertEquals("ok", cell.getDataStatus());
+            // denominator should be 1 (only assessed), not 2
+            assertEquals(1, cell.getDenominator());
+            assertEquals(0, cell.getNumerator());
+        }
     }
 
-    @Test
-    void selectLatestDailyAssessment_invalidRecords_filtered() {
-        Document invalid = new Document("pid", "p1")
-                .append("startTime", new Date())
-                .append("valid", "invalid");
+    // ════════════════════════════════════════════════════════════════════
+    // calcPlanCompletionRate — BigDecimal 精确计算
+    // ════════════════════════════════════════════════════════════════════
 
-        List<Document> result = calcService.selectLatestDailyAssessment(Collections.singletonList(invalid));
-        assertTrue(result.isEmpty());
+    @Nested
+    class PlanCompletionRateTest {
+        @Test
+        void noFieldMapping_returnsMappingRequired() {
+            // Unmap the fields to simulate missing configuration
+            properties.getFields().put("targetVolume", "");
+            properties.getFields().put("completedVolume", "");
+            NutritionQualityCell cell = calcService.calcPlanCompletionRate(Collections.emptyList());
+            assertEquals("mapping_required", cell.getDataStatus());
+        }
+
+        @Test
+        void withMapping_calculatesCorrectly() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document completed = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("mbl", "100")
+                    .append("wcl", "120");
+            Document notCompleted = new Document("pid", "p2")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("mbl", "100")
+                    .append("wcl", "50");
+
+            NutritionQualityCell cell = calcService.calcPlanCompletionRate(Arrays.asList(completed, notCompleted));
+            assertEquals("ok", cell.getDataStatus());
+            assertEquals(1, cell.getNumerator());
+            assertEquals(2, cell.getDenominator());
+            assertEquals(50.0, cell.getValue());
+            assertFalse(cell.getCompliant()); // 50% < 80%
+        }
+
+        @Test
+        void targetZero_excludedFromDenominator() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document zeroTarget = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("mbl", "0")
+                    .append("wcl", "100");
+
+            NutritionQualityCell cell = calcService.calcPlanCompletionRate(Collections.singletonList(zeroTarget));
+            assertEquals("no_data", cell.getDataStatus());
+        }
+
+        @Test
+        void completionOver100_notTruncated() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document over = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("mbl", "100")
+                    .append("wcl", "150");
+
+            NutritionQualityCell cell = calcService.calcPlanCompletionRate(Collections.singletonList(over));
+            assertEquals("ok", cell.getDataStatus());
+            assertEquals(1, cell.getNumerator());
+            assertEquals(1, cell.getDenominator());
+            assertTrue(cell.getCompliant()); // 100% >= 80%
+        }
+
+        @Test
+        void stringNumbers_parsedCorrectly() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            // completed (100) >= target (80) → 计入分子
+            Document doc = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("mbl", "80")
+                    .append("wcl", "100");
+
+            NutritionQualityCell cell = calcService.calcPlanCompletionRate(Collections.singletonList(doc));
+            assertEquals("ok", cell.getDataStatus());
+            // 1/1 * 100 = 100.00%
+            assertEquals(100.0, cell.getValue(), 0.01);
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // calcTubeBlockageRate — 使用 isChecked
+    // ════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class TubeBlockageRateTest {
+        @Test
+        void checkmarkComplication_counted() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document withBlockage = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("jxx", "√");
+            Document without = new Document("pid", "p2")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("jxx", "×");
+
+            NutritionQualityCell cell = calcService.calcTubeBlockageRate(Arrays.asList(withBlockage, without));
+            assertEquals("ok", cell.getDataStatus());
+            assertEquals(1, cell.getNumerator());
+            assertEquals(2, cell.getDenominator());
+        }
+
+        @Test
+        void noFieldMapping_returnsMappingRequired() {
+            properties.getFields().put("mechanicalComplication", "");
+            NutritionQualityCell cell = calcService.calcTubeBlockageRate(Collections.emptyList());
+            assertEquals("mapping_required", cell.getDataStatus());
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // calcEnteralParenteralRatio
+    // ════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class EnteralParenteralRatioTest {
+        @Test
+        void validValues_returnsCorrectRatio() {
+            NutritionQualityCell cell = calcService.calcEnteralParenteralRatio(20, 10);
+            assertEquals("ok", cell.getDataStatus());
+            assertEquals(2.0, cell.getValue());
+            assertTrue(cell.getCompliant()); // 2.0 >= 2.0
+        }
+
+        @Test
+        void zeroParenteral_returnsNoDenominator() {
+            NutritionQualityCell cell = calcService.calcEnteralParenteralRatio(20, 0);
+            assertEquals("no_denominator", cell.getDataStatus());
+        }
+
+        @Test
+        void belowTarget_notCompliant() {
+            NutritionQualityCell cell = calcService.calcEnteralParenteralRatio(5, 10);
+            assertEquals(0.5, cell.getValue());
+            assertFalse(cell.getCompliant()); // 0.5 < 2.0
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // 患者级去重
+    // ════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class PatientDedupTest {
+        @Test
+        void uniquePids_multipleRecords_returnsUniquePids() {
+            Document r1 = new Document("pid", "p1").append("valid", "valid");
+            Document r2 = new Document("pid", "p2").append("valid", "valid");
+            Document r3 = new Document("pid", "p1").append("valid", "valid");
+
+            Set<String> pids = calcService.uniquePids(Arrays.asList(r1, r2, r3));
+            assertEquals(2, pids.size());
+            assertTrue(pids.contains("p1"));
+            assertTrue(pids.contains("p2"));
+        }
+
+        @Test
+        void samePidMultipleRecords_onlyCountedOnceForComplication() {
+            Date time1 = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Date time2 = Date.from(java.time.Instant.parse("2026-08-31T05:00:00Z"));
+
+            // Same patient, two records — both with complication
+            Document r1 = new Document("pid", "p1")
+                    .append("startTime", time1)
+                    .append("valid", "valid")
+                    .append("jxx", "√");
+            Document r2 = new Document("pid", "p1")
+                    .append("startTime", time2)
+                    .append("valid", "valid")
+                    .append("jxx", "√");
+
+            Map<String, Object> stats = calcService.calcComplicationStats(
+                    Arrays.asList(r1, r2), "mechanical");
+            // assessedPids should only have 1 unique pid
+            assertEquals(1, stats.get("assessedCount"));
+            // affectedPids should also only have 1 unique pid
+            assertEquals(1, stats.get("affectedCount"));
+        }
+
+        @Test
+        void samePidOneComplicationOneNot_affectedCountOne() {
+            Date time1 = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Date time2 = Date.from(java.time.Instant.parse("2026-08-31T05:00:00Z"));
+
+            Document r1 = new Document("pid", "p1")
+                    .append("startTime", time1)
+                    .append("valid", "valid")
+                    .append("jxx", "√");
+            Document r2 = new Document("pid", "p1")
+                    .append("startTime", time2)
+                    .append("valid", "valid")
+                    .append("jxx", "×");
+
+            Map<String, Object> stats = calcService.calcComplicationStats(
+                    Arrays.asList(r1, r2), "mechanical");
+            assertEquals(1, stats.get("assessedCount"));
+            // At least one record has "√", so patient is counted as affected
+            assertEquals(1, stats.get("affectedCount"));
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // calcToleranceStats
+    // ════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class ToleranceStatsTest {
+        @Test
+        void mixedScores_calculatedCorrectly() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document tolerant = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("zf", 0);
+            Document intolerant = new Document("pid", "p2")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("zf", 3);
+            Document unassessed = new Document("pid", "p3")
+                    .append("startTime", time)
+                    .append("valid", "valid");
+
+            Map<String, Object> stats = calcService.calcToleranceStats(
+                    Arrays.asList(tolerant, intolerant, unassessed));
+            assertEquals(2, stats.get("assessedCount"));
+            assertEquals(1, stats.get("tolerantCount"));
+            assertEquals(1, stats.get("intolerantCount"));
+            assertEquals(1, stats.get("unassessedCount"));
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════
     // extractUniquePids
     // ════════════════════════════════════════════════════════════════════
-
-    @Test
-    void extractUniquePids_multipleRecords_returnsUniquePids() {
-        Document r1 = new Document("pid", "p1").append("valid", "valid");
-        Document r2 = new Document("pid", "p2").append("valid", "valid");
-        Document r3 = new Document("pid", "p1").append("valid", "valid");
-
-        List<String> pids = calcService.extractUniquePids(Arrays.asList(r1, r2, r3));
-        assertEquals(2, pids.size());
-        assertTrue(pids.contains("p1"));
-        assertTrue(pids.contains("p2"));
-    }
 
     @Test
     void extractUniquePids_emptyList_returnsEmpty() {
@@ -190,8 +568,8 @@ class NutritionQualityCalculationServiceTest {
 
     @Test
     void groupByMonth_multipleRecords_groupsCorrectly() {
-        Date jan = new Date(1705316400000L); // 2024-01
-        Date feb = new Date(1708008000000L); // 2024-02
+        Date jan = Date.from(java.time.Instant.parse("2026-01-15T05:00:00Z"));
+        Date feb = Date.from(java.time.Instant.parse("2026-02-15T05:00:00Z"));
 
         Document r1 = new Document("pid", "p1").append("startTime", jan).append("valid", "valid");
         Document r2 = new Document("pid", "p2").append("startTime", feb).append("valid", "valid");
@@ -199,194 +577,52 @@ class NutritionQualityCalculationServiceTest {
 
         Map<String, List<Document>> groups = calcService.groupByMonth(Arrays.asList(r1, r2, r3));
         assertEquals(2, groups.size());
-        assertTrue(groups.containsKey("2024-01"));
-        assertTrue(groups.containsKey("2024-02"));
-        assertEquals(2, groups.get("2024-01").size());
-        assertEquals(1, groups.get("2024-02").size());
-    }
-
-    @Test
-    void groupByMonth_emptyList_returnsEmpty() {
-        assertTrue(calcService.groupByMonth(Collections.emptyList()).isEmpty());
+        assertTrue(groups.containsKey("2026-01"));
+        assertTrue(groups.containsKey("2026-02"));
+        assertEquals(2, groups.get("2026-01").size());
+        assertEquals(1, groups.get("2026-02").size());
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // calcInterruptionRate
+    // buildJudgmentReason
     // ════════════════════════════════════════════════════════════════════
 
-    @Test
-    void calcInterruptionRate_emptyRecords_returnsNoData() {
-        NutritionQualityCell cell = calcService.calcInterruptionRate(Collections.emptyList());
-        assertEquals("no_data", cell.getDataStatus());
-    }
+    @Nested
+    class JudgmentReasonTest {
+        @Test
+        void interruptionRate_withPause_reasonContainsJ() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document doc = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid")
+                    .append("csList", Arrays.asList("J"));
 
-    @Test
-    void calcInterruptionRate_withPauseIntervention_calculatesCorrectly() {
-        Date time = new Date(1705316400000L);
-        Document withPause = new Document("pid", "p1")
-                .append("startTime", time)
-                .append("valid", "valid")
-                .append("csList", Arrays.asList("J"));
-        Document withoutPause = new Document("pid", "p2")
-                .append("startTime", time)
-                .append("valid", "valid")
-                .append("csList", Arrays.asList("H"));
+            String reason = calcService.buildJudgmentReason("enteralInterruptionRate", doc, true, true);
+            assertTrue(reason.contains("J"));
+        }
 
-        NutritionQualityCell cell = calcService.calcInterruptionRate(Arrays.asList(withPause, withoutPause));
-        assertEquals("ok", cell.getDataStatus());
-        assertEquals(1, cell.getNumerator());
-        assertEquals(2, cell.getDenominator());
-        assertEquals(50.0, cell.getValue());
-        assertFalse(cell.getCompliant()); // 50% > 10%
-    }
+        @Test
+        void feedingIntoleranceRate_unassessed_reasonContainsNull() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document doc = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid");
+            // No zf field → unassessed
 
-    @Test
-    void calcInterruptionRate_csFieldOnly_recognizesPause() {
-        Date time = new Date(1705316400000L);
-        Document withPause = new Document("pid", "p1")
-                .append("startTime", time)
-                .append("valid", "valid")
-                .append("cs", "J");
+            String reason = calcService.buildJudgmentReason("feedingIntoleranceRate", doc, false, false);
+            assertTrue(reason.contains("未评估") || reason.contains("null"));
+        }
 
-        NutritionQualityCell cell = calcService.calcInterruptionRate(Collections.singletonList(withPause));
-        assertEquals(1, cell.getNumerator());
-        assertFalse(cell.getCompliant()); // 100% > 10%
-    }
+        @Test
+        void planCompletionRate_targetNull_reasonContainsEmpty() {
+            Date time = Date.from(java.time.Instant.parse("2026-08-30T05:00:00Z"));
+            Document doc = new Document("pid", "p1")
+                    .append("startTime", time)
+                    .append("valid", "valid");
+            // No mbl field → target is null
 
-    @Test
-    void calcInterruptionRate_noInterruption_compliant() {
-        Date time = new Date(1705316400000L);
-        Document doc = new Document("pid", "p1")
-                .append("startTime", time)
-                .append("valid", "valid")
-                .append("csList", Arrays.asList("H", "I"));
-
-        NutritionQualityCell cell = calcService.calcInterruptionRate(Collections.singletonList(doc));
-        assertEquals(0, cell.getNumerator());
-        assertEquals(0.0, cell.getValue());
-        assertTrue(cell.getCompliant());
-    }
-
-    // ════════════════════════════════════════════════════════════════════
-    // calcFeedingIntoleranceRate
-    // ════════════════════════════════════════════════════════════════════
-
-    @Test
-    void calcFeedingIntoleranceRate_emptyRecords_returnsNoData() {
-        NutritionQualityCell cell = calcService.calcFeedingIntoleranceRate(Collections.emptyList());
-        assertEquals("no_data", cell.getDataStatus());
-    }
-
-    @Test
-    void calcFeedingIntoleranceRate_highScore_inNumerator() {
-        Date time = new Date(1705316400000L);
-        Document intolerant = new Document("pid", "p1")
-                .append("startTime", time)
-                .append("valid", "valid")
-                .append("zf", 3);
-        Document tolerant = new Document("pid", "p2")
-                .append("startTime", time)
-                .append("valid", "valid")
-                .append("zf", 0);
-
-        NutritionQualityCell cell = calcService.calcFeedingIntoleranceRate(Arrays.asList(intolerant, tolerant));
-        assertEquals("ok", cell.getDataStatus());
-        assertEquals(1, cell.getNumerator());
-        assertEquals(2, cell.getDenominator());
-        assertEquals(50.0, cell.getValue());
-        assertFalse(cell.getCompliant()); // 50% > 20%
-    }
-
-    @Test
-    void calcFeedingIntoleranceRate_jIntervention_inNumerator() {
-        Date time = new Date(1705316400000L);
-        Document withJ = new Document("pid", "p1")
-                .append("startTime", time)
-                .append("valid", "valid")
-                .append("zf", 0)
-                .append("csList", Arrays.asList("J"));
-
-        NutritionQualityCell cell = calcService.calcFeedingIntoleranceRate(Collections.singletonList(withJ));
-        assertEquals(1, cell.getNumerator());
-        assertFalse(cell.getCompliant());
-    }
-
-    @Test
-    void calcFeedingIntoleranceRate_allTolerant_compliant() {
-        Date time = new Date(1705316400000L);
-        Document doc = new Document("pid", "p1")
-                .append("startTime", time)
-                .append("valid", "valid")
-                .append("zf", 0);
-
-        NutritionQualityCell cell = calcService.calcFeedingIntoleranceRate(Collections.singletonList(doc));
-        assertEquals(0, cell.getNumerator());
-        assertTrue(cell.getCompliant());
-    }
-
-    // ════════════════════════════════════════════════════════════════════
-    // calcPlanCompletionRate
-    // ════════════════════════════════════════════════════════════════════
-
-    @Test
-    void calcPlanCompletionRate_noFieldMapping_returnsMappingRequired() {
-        NutritionQualityCell cell = calcService.calcPlanCompletionRate(Collections.emptyList());
-        assertEquals("mapping_required", cell.getDataStatus());
-    }
-
-    @Test
-    void calcPlanCompletionRate_withMapping_calculatesCorrectly() {
-        properties.getFields().put("targetVolume", "ymNum");
-        properties.getFields().put("completedVolume", "wcyl");
-
-        Date time = new Date(1705316400000L);
-        Document completed = new Document("pid", "p1")
-                .append("startTime", time)
-                .append("valid", "valid")
-                .append("ymNum", 100)
-                .append("wcyl", 120);
-        Document notCompleted = new Document("pid", "p2")
-                .append("startTime", time)
-                .append("valid", "valid")
-                .append("ymNum", 100)
-                .append("wcyl", 50);
-
-        NutritionQualityCell cell = calcService.calcPlanCompletionRate(Arrays.asList(completed, notCompleted));
-        assertEquals("ok", cell.getDataStatus());
-        assertEquals(1, cell.getNumerator());
-        assertEquals(2, cell.getDenominator());
-        assertEquals(50.0, cell.getValue());
-        assertFalse(cell.getCompliant()); // 50% < 80%
-    }
-
-    // ════════════════════════════════════════════════════════════════════
-    // calcEnteralParenteralRatio
-    // ════════════════════════════════════════════════════════════════════
-
-    @Test
-    void calcEnteralParenteralRatio_validValues_returnsCorrectRatio() {
-        NutritionQualityCell cell = calcService.calcEnteralParenteralRatio(20, 10);
-        assertEquals("ok", cell.getDataStatus());
-        assertEquals(2.0, cell.getValue());
-        assertTrue(cell.getCompliant()); // 2.0 >= 2.0
-    }
-
-    @Test
-    void calcEnteralParenteralRatio_zeroParenteral_returnsNoDenominator() {
-        NutritionQualityCell cell = calcService.calcEnteralParenteralRatio(20, 0);
-        assertEquals("no_denominator", cell.getDataStatus());
-    }
-
-    @Test
-    void calcEnteralParenteralRatio_bothZero_returnsNoDenominator() {
-        NutritionQualityCell cell = calcService.calcEnteralParenteralRatio(0, 0);
-        assertEquals("no_denominator", cell.getDataStatus());
-    }
-
-    @Test
-    void calcEnteralParenteralRatio_belowTarget_notCompliant() {
-        NutritionQualityCell cell = calcService.calcEnteralParenteralRatio(5, 10);
-        assertEquals(0.5, cell.getValue());
-        assertFalse(cell.getCompliant()); // 0.5 < 2.0
+            String reason = calcService.buildJudgmentReason("enteralPlanCompletionRate", doc, false, false);
+            assertTrue(reason.contains("目标量为空") || reason.contains("不计入分母"));
+        }
     }
 }

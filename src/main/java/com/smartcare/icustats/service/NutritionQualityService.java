@@ -652,10 +652,10 @@ public class NutritionQualityService {
                     inNumerator = (score != null && score > 0) || adapter.hasPauseIntervention(record);
                     break;
                 case "enteralPlanCompletionRate":
-                    Double target = adapter.getTargetVolume(record);
-                    Double completed = adapter.getCompletedVolume(record);
-                    inDenominator = target != null && target > 0 && completed != null;
-                    inNumerator = inDenominator && completed >= target;
+                    java.math.BigDecimal tgt = adapter.getTargetVolume(record);
+                    java.math.BigDecimal cpl = adapter.getCompletedVolume(record);
+                    inDenominator = tgt != null && tgt.compareTo(java.math.BigDecimal.ZERO) > 0 && cpl != null;
+                    inNumerator = inDenominator && cpl.compareTo(tgt) >= 0;
                     break;
                 default:
                     break;
@@ -780,10 +780,10 @@ public class NutritionQualityService {
                     break;
 
                 case "enteralPlanCompletionRate":
-                    Double target = adapter.getTargetVolume(record);
-                    Double completed = adapter.getCompletedVolume(record);
-                    inDenominator = target != null && target > 0 && completed != null;
-                    inNumerator = inDenominator && completed >= target;
+                    java.math.BigDecimal tgt2 = adapter.getTargetVolume(record);
+                    java.math.BigDecimal cpl2 = adapter.getCompletedVolume(record);
+                    inDenominator = tgt2 != null && tgt2.compareTo(java.math.BigDecimal.ZERO) > 0 && cpl2 != null;
+                    inNumerator = inDenominator && cpl2.compareTo(tgt2) >= 0;
                     judgmentReason = calcService.buildJudgmentReason(indicatorKey, record, inNumerator, inDenominator);
                     break;
 
