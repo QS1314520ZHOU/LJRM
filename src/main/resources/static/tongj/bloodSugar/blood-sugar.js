@@ -285,19 +285,9 @@
     }
 
     // ============ 调试日志 ============
-    function dbg(msg, data) {
+    function dbg(msg) {
         var ts = new Date().toLocaleTimeString();
-        var line = '[血糖-' + ts + '] ' + msg;
-        if (data !== undefined) {
-            console.log(line, data);
-        } else {
-            console.log(line);
-        }
-        var logEl = document.getElementById('debugLog');
-        if (logEl) {
-            logEl.textContent += line + '\n';
-            logEl.scrollTop = logEl.scrollHeight;
-        }
+        console.log('[血糖-' + ts + '] ' + msg);
     }
 
     // ============ 生命周期事件 ============
@@ -586,11 +576,15 @@
         fetch(url, { signal: currentAbortController.signal })
             .then(function (response) {
                 if (!response.ok) {
-                    return response.json().then(function (err) {
-                        throw new Error(err.error || '请求失败: ' + response.status);
-                    }).catch(function (e) {
-                        if (e.message) throw e;
-                        throw new Error('请求失败: ' + response.status);
+                    // 尝试解析 JSON 错误响应，失败则用文本
+                    return response.text().then(function (text) {
+                        try {
+                            var err = JSON.parse(text);
+                            throw new Error(err.error || err.msg || '服务器错误: ' + response.status);
+                        } catch (parseErr) {
+                            if (parseErr.message && parseErr.message !== text) throw parseErr;
+                            throw new Error('服务器错误: ' + response.status);
+                        }
                     });
                 }
                 return response.json();

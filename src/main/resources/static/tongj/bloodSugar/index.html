@@ -150,34 +150,6 @@
       })();
     </script>
 
-    <!-- 调试状态栏 -->
-    <div id="debugStatusBar" style="position:fixed;top:0;left:0;right:0;background:#1e293b;color:#22d3ee;font:12px/1.4 monospace;z-index:9999;padding:4px 12px;display:flex;align-items:center;gap:12px;">
-      <span>🔍</span>
-      <span id="debugStatusText">初始化中...</span>
-      <span id="debugCount" style="color:#64748b;margin-left:auto;"></span>
-    </div>
-    <script>
-      // 调试状态栏 + console.log 同步
-      (function(){
-        var origLog = console.log;
-        var count = 0;
-        console.log = function() {
-          origLog.apply(console, arguments);
-          count++;
-          var text = arguments[0] || '';
-          var short = String(text).replace(/^\[[^\]]+\]\s*/, '').substring(0, 80);
-          var el = document.getElementById('debugStatusText');
-          if (el) el.textContent = short;
-          var cnt = document.getElementById('debugCount');
-          if (cnt) cnt.textContent = count + '条日志 (F12查看完整)';
-        };
-        window.addEventListener('load', function(){
-          var el = document.getElementById('debugStatusText');
-          if (el) el.textContent = '页面已加载，等待握手...';
-        });
-      })();
-    </script>
-
     <script src="/tongj/bloodSugar/vendor/xlsx.full.min.js"></script>
     <script src="/tongj/bloodSugar/blood-sugar.js"></script>
 </body>
