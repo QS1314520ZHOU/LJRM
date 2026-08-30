@@ -613,11 +613,7 @@ public class QualityService {
             double predictedMortalitySum = 0;
             for (Map.Entry<String, Document> e : selectedScoreByPid.entrySet()) {
                 Document score = e.getValue();
-                double total = NumberUtils.safeNumber(score.get("total"));
-                if (total == 0) {
-                    Object apacheII = score.get("apacheII");
-                    if (apacheII instanceof Map) total = NumberUtils.safeNumber(((Map<?, ?>) apacheII).get("totalScore"));
-                }
+                double total = getScoreTotal(score);
                 if (total < 15) {
                     apacheLt15++;
                     String pid = e.getKey();
@@ -1057,13 +1053,30 @@ public class QualityService {
         return rows;
     }
 
+    /**
+     * 获取 APACHEⅡ 总分。
+     *
+     * 对应旧版 JavaScript 语义：score.total ?? score.apacheII?.totalScore
+     * total=0 是合法分数，必须保留；只有 total 为 null/不存在时才回退到 apacheII.totalScore。
+     */
     private double getScoreTotal(Document score) {
-        double total = NumberUtils.safeNumber(score.get("total"));
-        if (total != 0) return total;
-        Object apacheII = score.get("apacheII");
-        if (apacheII instanceof Map) {
-            return NumberUtils.safeNumber(((Map<?, ?>) apacheII).get("totalScore"));
+        if (score == null) {
+            return 0;
         }
+
+        Object totalValue = score.get("total");
+        if (totalValue != null) {
+            return NumberUtils.safeNumber(totalValue);
+        }
+
+        Object apacheIIValue = score.get("apacheII");
+        if (apacheIIValue instanceof Map<?, ?>) {
+            Object totalScoreValue = ((Map<?, ?>) apacheIIValue).get("totalScore");
+            if (totalScoreValue != null) {
+                return NumberUtils.safeNumber(totalScoreValue);
+            }
+        }
+
         return 0;
     }
 

@@ -271,7 +271,7 @@ public class QualityCalcService {
 
             if (s == null) continue;
 
-            double total = NumberUtils.safeNumber(s.get("total"));
+            double total = getApacheScoreTotal(s);
             if (total >= 15) {
                 gte15++;
                 detailGte15.add(pid);
@@ -305,7 +305,7 @@ public class QualityCalcService {
         int lt15Total = 0, lt15Death = 0;
 
         for (Document p : patients) {
-            String dischargedType = String.valueOf(p.getOrDefault("dischargedType", ""));
+            String dischargedType = getDischargeType(p);
             if (dischargedType.contains("死亡")) actualDeath++;
 
             Document s = scoreMap.get(String.valueOf(p.get("_id")));
@@ -322,7 +322,7 @@ public class QualityCalcService {
                     }
                 }
 
-                double total = NumberUtils.safeNumber(s.get("total"));
+                double total = getApacheScoreTotal(s);
                 if (total < 15) {
                     lt15Total++;
                     if (dischargedType.contains("死亡")) lt15Death++;
@@ -699,7 +699,7 @@ public class QualityCalcService {
         }
 
         Query patientQuery = new Query(Criteria.where("mrn").in(mrns));
-        patientQuery.fields().include("mrn").include("dischargedType");
+        patientQuery.fields().include("mrn").include("dischargedType").include("dischargeType");
         List<Document> patients = smartCareMongo.find(patientQuery, Document.class, CollectionConstants.PATIENT);
 
         Map<String, Document> byMrn = new LinkedHashMap<>();
@@ -712,7 +712,7 @@ public class QualityCalcService {
         for (String mrn : mrns) {
             Document p = byMrn.get(mrn);
             if (p == null) continue;
-            String dischargedType = String.valueOf(p.getOrDefault("dischargedType", ""));
+            String dischargedType = getDischargeType(p);
             if (dischargedType.contains("死亡（终末）")) {
                 terminal++;
                 continue;
@@ -914,6 +914,59 @@ public class QualityCalcService {
     }
 
     // ==================== Private Helpers ====================
+
+    /**
+     * 获取 APACHEⅡ 总分。
+     *
+     * 规则等同于 JavaScript：score.total ?? score.apacheII?.totalScore
+     * total=0 是合法分数，不得因为值为0而回退。
+     */
+    private static double getApacheScoreTotal(Document score) {
+        if (score == null) {
+            return 0;
+        }
+
+        Object totalValue = score.get("total");
+        if (totalValue != null) {
+            return NumberUtils.safeNumber(totalValue);
+        }
+
+        Object apacheIIValue = score.get("apacheII");
+        if (apacheIIValue instanceof Map<?, ?>) {
+            Object totalScoreValue = ((Map<?, ?>) apacheIIValue).get("totalScore");
+            if (totalScoreValue != null) {
+                return NumberUtils.safeNumber(totalScoreValue);
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * 获取患者出科类型。
+     * 优先使用 dischargedType；为空时兼容历史字段 dischargeType。
+     */
+    private static String getDischargeType(Document patient) {
+        if (patient == null) {
+            return "";
+        }
+        String dischargedType = normalizeText(patient.get("dischargedType"));
+        if (!dischargedType.isEmpty()) {
+            return dischargedType;
+        }
+        return normalizeText(patient.get("dischargeType"));
+    }
+
+    /**
+     * 将字段转换为去除首尾空格的字符串。
+     */
+    private static String normalizeText(Object value) {
+        if (value == null) {
+            return "";
+        }
+        String text = String.valueOf(value).trim();
+        return "null".equalsIgnoreCase(text) ? "" : text;
+    }
 
     /**
      * Build order query filter up to month end (inclusive of all orders before month end).
