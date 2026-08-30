@@ -73,23 +73,45 @@
         startHandshake();
     }
 
+    // ============ 调试日志 ============
+    function dbg(msg, data) {
+        var ts = new Date().toLocaleTimeString();
+        var line = '[血糖-' + ts + '] ' + msg;
+        if (data !== undefined) {
+            console.log(line, data);
+        } else {
+            console.log(line);
+        }
+        // 同时写入页面可见区域，方便调试
+        var logEl = document.getElementById('debugLog');
+        if (logEl) {
+            logEl.textContent += line + '\n';
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+    }
+
     // ============ postMessage 握手 ============
     function startHandshake() {
         handshakeAttempts = 0;
+        dbg('页面加载完成，当前URL: ' + window.location.href);
+        dbg('是否在iframe中: ' + (window.self !== window.top));
+        dbg('parent是否可用: ' + (typeof window.parent));
+        dbg('开始握手，发送 SmartCare-form-ready...');
         sendReadyMessage();
     }
 
     function sendReadyMessage() {
         if (handshakeRetryTimer) clearTimeout(handshakeRetryTimer);
 
-        window.parent.postMessage({
-            type: 'SmartCare-form-ready',
-            form: 'bloodSugar'
-        }, '*');
+        var msg = { type: 'SmartCare-form-ready', form: 'bloodSugar' };
+        window.parent.postMessage(msg, '*');
+        dbg('第 ' + handshakeAttempts + ' 次发送 ready 消息到 parent');
 
         handshakeAttempts++;
         if (handshakeAttempts < MAX_HANDSHAKE_ATTEMPTS) {
             handshakeRetryTimer = setTimeout(sendReadyMessage, 200);
+        } else {
+            dbg('握手重试已达上限(' + MAX_HANDSHAKE_ATTEMPTS + '次)，父窗口可能未监听 postMessage');
         }
     }
 
@@ -102,25 +124,45 @@
     }
 
     function onMessage(event) {
-        if (!isAllowedOrigin(event.origin)) return;
+        dbg('收到消息 origin=' + event.origin, event.data);
+
+        if (!isAllowedOrigin(event.origin)) {
+            dbg('❌ origin不匹配，已忽略: ' + event.origin);
+            return;
+        }
 
         var data = event.data;
-        if (!data || typeof data !== 'object') return;
+        if (!data || typeof data !== 'object') {
+            dbg('消息非对象，已忽略');
+            return;
+        }
 
         var type = data.type;
+        dbg('消息type=' + type);
+
         if (type === 'SmartCare' || type === 'SmartCare-patient-info' || type === 'SmartCare-set-patient') {
             var patient = data.patient || data;
-            if (!patient) return;
+            if (!patient) {
+                dbg('消息中无patient字段');
+                return;
+            }
 
             var pid = extractPatientId(patient);
-            if (!pid) return;
+            dbg('提取到patientId=' + pid);
+            if (!pid) {
+                dbg('❌ 无法提取有效的patientId');
+                return;
+            }
 
             if (handshakeRetryTimer) {
                 clearTimeout(handshakeRetryTimer);
                 handshakeRetryTimer = null;
             }
 
+            dbg('✅ 收到患者: ' + pid);
             onPatientReceived(pid, patient);
+        } else {
+            dbg('未识别的消息type: ' + type);
         }
     }
 
@@ -420,8 +462,11 @@
             url += '?startTime=' + encodeURIComponent(range.startTime) + '&endTime=' + encodeURIComponent(range.endTime);
         }
 
+        dbg('请求血糖数据: ' + url);
+
         fetch(url, { signal: currentAbortController.signal })
             .then(function (response) {
+                dbg('API响应 status=' + response.status);
                 if (!response.ok) {
                     return response.json().then(function (err) {
                         throw new Error(err.error || '请求失败: ' + response.status);
@@ -440,6 +485,7 @@
 
                 var data = result.data;
                 if (!data || !data.patient) {
+                    dbg('返回数据无patient字段');
                     showError('未找到患者信息');
                     return;
                 }
@@ -452,6 +498,8 @@
 
                 renderPatientInfo(data.patient);
 
+                dbg('获取到 ' + (data.rows ? data.rows.length : 0) + ' 条血糖记录');
+
                 if (!data.rows || data.rows.length === 0) {
                     showEmpty();
                 } else {
@@ -461,10 +509,11 @@
                 }
             })
             .catch(function (err) {
-                if (err.name === 'AbortError') return;
+                if (err.name === 'AbortError') { dbg('请求被abort'); return; }
                 if (requestVersion !== version) return;
                 if (currentPatientId !== pid) return;
                 hideLoading();
+                dbg('❌ 请求失败: ' + err.message);
                 showError('血糖数据加载失败，请重试');
             });
     }
