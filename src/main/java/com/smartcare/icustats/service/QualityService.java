@@ -1519,8 +1519,7 @@ public class QualityService {
 
             switch (key) {
                 case "shockBundleRate":
-                    matched = qualityCalcService.getMatchedPatientsByOrderFilter(monthKey, patients,
-                            qualityCalcService.orderQueryToMonthEnd(monthKey, Collections.singletonList("感染性休克集束化治疗")));
+                    matched = qualityCalcService.calcShockBundle(monthKey, department);
                     break;
                 case "shockUltrasoundRate":
                     matched = qualityCalcService.calcOrderBasedCarryover(monthKey, department, "休克护理常规", "重症超声筛查评估");
@@ -1564,19 +1563,6 @@ public class QualityService {
             // For most indicators, the matched map has "done" (numerator) and "denominator" keys
             List<Document> doneList = (List<Document>) matched.get("done");
             List<Document> denomList = (List<Document>) matched.get("denominator");
-
-            // For rescue success rate, use different keys
-            if ("rescueSuccessRate".equals(key)) {
-                // Rescue uses calcRescue which returns different structure
-                // itemOrder 0 = success (num), 1 = total rescues (denom)
-                // We'll show all rescue patients as denominator
-                if (itemOrder == 1) {
-                    for (Document patient : patients) {
-                        rows.add(toPatientDetailRow(patient, rows.size() + 1, monthKey, Collections.emptyMap()));
-                    }
-                }
-                continue;
-            }
 
             if (itemOrder == 0 && doneList != null) {
                 // Numerator: patients who completed the order

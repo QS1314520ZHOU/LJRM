@@ -359,7 +359,8 @@ public class QualityCalcService {
         if (denominatorDone.isEmpty()) {
             log.info("QUALITY_CALC indicator=shockBundleRate month={} patientCount={} denomCandidateCount={} matchedPatientCount=0 status=NO_ORDER_CANDIDATE",
                     monthKey, patients.size(), denominatorAll.size());
-            return mapOf("num", 0, "denom", 0, "notDone", Collections.emptyList());
+            return mapOf("num", 0, "denom", 0, "notDone", Collections.emptyList(),
+                    "done", Collections.emptyList(), "denominator", Collections.emptyList());
         }
 
         Document numFilter = orderQueryToMonthEnd(monthKey, Collections.singletonList("感染性休克患者集束化治疗"));
@@ -375,7 +376,8 @@ public class QualityCalcService {
         log.info("QUALITY_CALC indicator=shockBundleRate month={} enableDeptFilter={} patientCount={} denomCandidateCount={} matchedPatientCount={} numerator={} denominator={} source=live status=ok",
                 monthKey, properties.isEnableDeptFilter(), patients.size(), denominatorAll.size(), denominatorDone.size(), numeratorDone.size(), denominatorDone.size());
 
-        return mapOf("num", numeratorDone.size(), "denom", denominatorDone.size(), "notDone", notDoneIds);
+        return mapOf("num", numeratorDone.size(), "denom", denominatorDone.size(), "notDone", notDoneIds,
+                "done", numeratorDone, "denominator", denominatorDone);
     }
 
     /**
@@ -412,7 +414,9 @@ public class QualityCalcService {
                 monthKey, properties.isEnableDeptFilter(), patients.size(), denominator.size(), done.size(), denominator.size(),
                 denominator.isEmpty() ? "NO_ORDER_CANDIDATE" : "ok");
 
-        return mapOf("num", done.size(), "denom", denominator.size());
+        // 同时返回患者列表，供质控明细（分子/分母查看详情）渲染行
+        return mapOf("num", done.size(), "denom", denominator.size(),
+                "done", done, "denominator", denominator);
     }
 
     /**
@@ -590,7 +594,7 @@ public class QualityCalcService {
         if (patients.isEmpty()) {
             log.info("QUALITY_CALC indicator=en48hRate month={} allPatientCount={} eligiblePatientCount=0 source=live status=NO_ICU_PATIENT",
                     monthKey, getInIcuPatients(monthKey, department).size());
-            return mapOf("num", 0, "denom", 0);
+            return mapOf("num", 0, "denom", 0, "done", Collections.emptyList(), "denominator", Collections.emptyList());
         }
 
         List<String> mrns = patients.stream()
@@ -626,6 +630,7 @@ public class QualityCalcService {
         }
 
         long num = 0;
+        List<Document> donePatients = new ArrayList<>();
         for (Map.Entry<String, List<Document>> entry : patientsByMrn.entrySet()) {
             String mrn = entry.getKey();
             List<Document> mrnPatients = sortPatientsByAdmission(entry.getValue());
@@ -650,6 +655,7 @@ public class QualityCalcService {
                 if (matchedOrderIndex >= 0) {
                     usedOrders.add(matchedOrderIndex);
                     num += 1;
+                    donePatients.add(patient);
                 }
             }
         }
@@ -657,7 +663,8 @@ public class QualityCalcService {
         log.info("QUALITY_CALC indicator=en48hRate month={} enableDeptFilter={} eligiblePatientCount={} orderCandidateCount={} numerator={} denominator={} source=live status=ok",
                 monthKey, properties.isEnableDeptFilter(), patients.size(), orders.size(), num, patients.size());
 
-        return mapOf("num", num, "denom", patients.size());
+        return mapOf("num", num, "denom", patients.size(),
+                "done", donePatients, "denominator", patients);
     }
 
     /**
@@ -695,11 +702,12 @@ public class QualityCalcService {
                 .collect(Collectors.toList());
 
         if (mrns.isEmpty()) {
-            return mapOf("num", 0, "denom", 0, "death", 0, "terminal", 0, "rescueCount", 0);
+            return mapOf("num", 0, "denom", 0, "death", 0, "terminal", 0, "rescueCount", 0,
+                    "done", Collections.emptyList(), "denominator", Collections.emptyList());
         }
 
+        // 查完整患者文档：明细行需要姓名/床号/出入科时间等字段
         Query patientQuery = new Query(Criteria.where("mrn").in(mrns));
-        patientQuery.fields().include("mrn").include("dischargedType").include("dischargeType");
         List<Document> patients = smartCareMongo.find(patientQuery, Document.class, CollectionConstants.PATIENT);
 
         Map<String, Document> byMrn = new LinkedHashMap<>();
@@ -709,6 +717,8 @@ public class QualityCalcService {
         }
 
         long denom = 0, success = 0, death = 0, terminal = 0;
+        List<Document> successPatients = new ArrayList<>();
+        List<Document> denomPatients = new ArrayList<>();
         for (String mrn : mrns) {
             Document p = byMrn.get(mrn);
             if (p == null) continue;
@@ -718,8 +728,12 @@ public class QualityCalcService {
                 continue;
             }
             denom++;
+            denomPatients.add(p);
             if (dischargedType.contains("死亡")) death++;
-            else success++;
+            else {
+                success++;
+                successPatients.add(p);
+            }
         }
 
         log.info("QUALITY_CALC indicator=rescueSuccessRate month={} rescueOrderCount={} mrnCount={} patientMatchCount={} success={} death={} terminal={} denom={} source=live status={}",
@@ -727,7 +741,8 @@ public class QualityCalcService {
                 rescueOrders.isEmpty() ? "NO_ORDER_CANDIDATE" : "ok");
 
         return mapOf("num", success, "denom", denom, "death", death, "terminal", terminal,
-                "rescueCount", rescueOrders.size());
+                "rescueCount", rescueOrders.size(),
+                "done", successPatients, "denominator", denomPatients);
     }
 
     /**
@@ -873,7 +888,7 @@ public class QualityCalcService {
                             denomKeyword.contains("脑损伤") ? "acuteBrainInjuryRate" : "unknown";
             log.info("QUALITY_CALC indicator={} denomKeyword={} numKeyword={} month={} patientCount={} denomMatchedCount=0 source=live status=NO_ORDER_CANDIDATE",
                     indicatorKey, denomKeyword, numKeyword, monthKey, patients.size());
-            return mapOf("num", 0, "denom", 0);
+            return mapOf("num", 0, "denom", 0, "done", Collections.emptyList(), "denominator", Collections.emptyList());
         }
 
         Document numFilter = orderQueryToMonthEnd(monthKey, Collections.singletonList(numKeyword));
@@ -888,7 +903,9 @@ public class QualityCalcService {
         log.info("QUALITY_CALC indicator={} month={} enableDeptFilter={} patientCount={} denomMatchedCount={} numerator={} denominator={} source=live status=ok",
                 indicatorKey, monthKey, properties.isEnableDeptFilter(), patients.size(), denominatorDone.size(), numeratorDone.size(), denominatorDone.size());
 
-        return mapOf("num", numeratorDone.size(), "denom", denominatorDone.size());
+        // 同时返回患者列表，供质控明细（分子/分母查看详情）渲染行
+        return mapOf("num", numeratorDone.size(), "denom", denominatorDone.size(),
+                "done", numeratorDone, "denominator", denominatorDone);
     }
 
     /**
@@ -910,7 +927,9 @@ public class QualityCalcService {
                 indicatorKey, monthKey, properties.isEnableDeptFilter(), patients.size(), denominator.size(), done.size(), denominator.size(),
                 denominator.isEmpty() ? "NO_ORDER_CANDIDATE" : "ok");
 
-        return mapOf("num", done.size(), "denom", denominator.size());
+        // 同时返回患者列表，供质控明细（分子/分母查看详情）渲染行
+        return mapOf("num", done.size(), "denom", denominator.size(),
+                "done", done, "denominator", denominator);
     }
 
     // ==================== Private Helpers ====================
