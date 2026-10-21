@@ -319,6 +319,13 @@ public class QualityService {
             return detailResult(spec, APACHE_DETAIL_COLUMNS, rows);
         }
 
+        // ── Extubation / Return detail with itemOrder ──────────────────
+        // 必须在 CALCULATED_FALLBACK_KEYS 之前判断：这三个 key 也在 fallback 集合中，
+        // 若先走 fallback 会落入 default 分支，把当月全部 ICU 患者当作分母明细。
+        if (itemOrd != null && Arrays.asList("unplannedExtubationRate", "reintubation48hRate", "icuReturn48hRate").contains(key)) {
+            return buildExtubationReturnDetailRows(spec, key, itemOrd, months, department);
+        }
+
         // ── Calculated fallback detail with itemOrder ──────────────────
         if (CALCULATED_FALLBACK_KEYS.contains(key) && itemOrd != null) {
             return buildCalculatedDetailRows(spec, key, itemOrd, months, startM, endM, department);
@@ -333,11 +340,6 @@ public class QualityService {
         // ── Set-based detail with itemOrder ────────────────────────────
         if (itemOrd != null && SET_BASED_KEYS.contains(key)) {
             return buildSetBasedDetailRows(spec, key, itemOrd, months, startM, endM, department);
-        }
-
-        // ── Extubation / Return detail with itemOrder ──────────────────
-        if (itemOrd != null && Arrays.asList("unplannedExtubationRate", "reintubation48hRate", "icuReturn48hRate").contains(key)) {
-            return buildExtubationReturnDetailRows(spec, key, itemOrd, months, department);
         }
 
         // ── Count type fallback ────────────────────────────────────────
@@ -698,6 +700,9 @@ public class QualityService {
             stats.put("rescueDenom", toLong(rescue.get("denom")));
             stats.put("brainInjuryNum", toLong(brainInjury.get("num")));
             stats.put("brainInjuryDenom", toLong(brainInjury.get("denom")));
+            // 非计划转入ICU率：分子取质控视图 NoPlanInICUNum，分母为当月新收患者数
+            stats.put("unplannedIcuTransferNum", getQualityDataValue(monthKey, "NoPlanInICUNum", "非计划转入ICU患者数"));
+            stats.put("unplannedIcuTransferDenom", NumberUtils.safeNumber(basicStats.getOrDefault(monthKey, Collections.emptyMap()).get("newAdmissions")));
 
             result.put(monthKey, stats);
         }
@@ -932,6 +937,10 @@ public class QualityService {
             case "icuReturn48hRate":
                 result.put("numerator", NumberUtils.safeNumber(stats.get("icuReturn48hNum")));
                 result.put("denominator", NumberUtils.safeNumber(stats.get("icuReturn48hDenom")));
+                break;
+            case "unplannedIcuTransferRate":
+                result.put("numerator", NumberUtils.safeNumber(stats.get("unplannedIcuTransferNum")));
+                result.put("denominator", NumberUtils.safeNumber(stats.get("unplannedIcuTransferDenom")));
                 break;
             case "shockUltrasoundRate":
                 result.put("numerator", NumberUtils.safeNumber(stats.get("shockUltrasoundNum")));
@@ -1319,7 +1328,8 @@ public class QualityService {
                 rows = getBasicPatientRows("icuCensus", months, department);
             }
         } else if ("unplannedIcuTransferRate".equals(key)) {
-            rows = getBasicPatientRows("icuCensus", months, department);
+            // 分子来自质控视图聚合值（NoPlanInICUNum），无患者明细；分母为当月新收患者
+            rows = itemOrder == 1 ? getBasicPatientRows("newAdmissions", months, department) : Collections.emptyList();
         } else if ("apacheLt15DeathRate".equals(key)) {
             rows = getApachePatientRows(key, itemOrder, months, department);
             columns = APACHE_DETAIL_COLUMNS;
